@@ -63,7 +63,7 @@ This tutorial requires:
 
 ## Download and setup instructions
 
-- Please clone the content of the following repository in your computer the day before course: https://github.com/saezlab/microbiome_analysis_course_2022 
+- Please clone the content of the following repository in your computer the day before course: https://github.com/saezlab/Microbiome_analysis_course_2022.git
 - The following code chunk takes care of checking and installing those packages in your R installation. Please run it from your computer: 
 
 ```{r, message=FALSE}
