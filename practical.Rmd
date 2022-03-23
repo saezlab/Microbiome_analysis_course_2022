@@ -1,0 +1,113 @@
+---
+title: "Microbiome Data Analysis & Visualization Course"
+author: 
+  - Ece Kartal, Daniel Dimitrov, Hanna Schumacher
+output: html_document 
+date: "15-03-2022"
+---
+
+## About
+This vignette contains the course schedule and material of the Microbiome Data Analysis & Visualization Course. 
+The estimated time to go over the content of the tutorial is of ~2 hours for theoretical part & 3.5 hours for practical session. 
+
+We will discuss the role of the microbiome in human body and the consequences of its dysfunction on the body
+- What is the microbiome,
+- How to study microbiome and their limitations 
+- Evolution of microbiome over human lifespan
+- The human microbiome in health and disease 
+- Applications based on microbiome
+
+
+This is the schedule for the practical session:
+
+- Introduction, setup and troubleshooting: 15 minutes
+- Shotgun metagenomics data quality control and normalization: 15 minutes
+- Alpha diversity calculation (within sample diversity) & visualization: 40 minutes
+- Break: 10 minutes
+- Beta diversity calculation (between sample diversity) & visualization: 40 minutes
+- Differential abundance analysis: 40 minutes
+- Break: 10 minutes
+- Machine learning modelling with SIAMCAT: 50 minutes
+- Conclusions: 10 minutes
+
+Please contact me at [ece.kartal@uni-heidelberg.de](mailto:ece.kartal@uni-heidelberg.de). 
+Feedback about the tutorial is also highly appreciated.
+
+## Before you start
+
+This tutorial is intended to guide users through the statistical analysis of shotgun metagenomics data. 
+We assume the following skills in the audience:
+
+- Basic knowledge of the [statistical programming language R](https://www.r-project.org/about.html).
+- Basic knowledge about how to load and make use of external R packages, such as those included in the [tidyverse](https://www.tidyverse.org/) and [Bioconductor packages](http://bioconductor.org/).
+- Be familiar with concepts like omics data, biological databases, exploratory data analysis and hypothesis testing.
+
+This tutorial requires:
+
+- R >= 4.1.2 You can download an install R from [this link](https://cran.r-project.org/).
+- The following R packages are also required:
+  - `tidyverse`
+  - `knitr`
+  - `ggrepel`
+  - `pROC`
+  - `vegan`
+  - `reshape2`
+  - `ggplot2`
+  - `ggpubr`
+  - `car`
+  - `dplyr`
+  - `plyr`
+  - `SIAMCAT`
+  
+- Rstudio is highly recommended to open, run and modify the R code that we will use in this tutorial. You can download and install Rstudio from [this link](https://www.rstudio.com/products/rstudio/download/). Please install RStudio Desktop, Open Source Edition, which is free thanks to its Open Source License.  
+
+## Download and setup instructions
+
+- Please clone the content of the following repository in your computer the day before course: https://github.com/saezlab/microbiome_analysis_course_2022 
+- The following code chunk takes care of checking and installing those packages in your R installation. Please run it from your computer: 
+
+```{r, message=FALSE}
+# CRAN packages
+cran_packages <- c("tidyverse", "BiocManager", "knitr", "ggrepel", "pROC", "vegan",
+                   "reshape2", "ggplot2", "ggpubr", "car",  "dplyr", "plyr")
+for (i in cran_packages) {
+  if (!require(i, character.only = TRUE))
+    install.packages(i)
+}
+
+# BioC packages
+bioc_packages <-
+  c("SIAMCAT")
+for (i in bioc_packages) {
+  if (!require(i, character.only = TRUE))
+    BiocManager::install(i, update = FALSE)
+} 
+```
+
+## The biology of the tutorial
+
+In this tutorial we will work with a subset of the shotgun metagenomics data available in the ENA entry [PRJEB38625](https://www.ebi.ac.uk/ena/browser/view/PRJEB47605?show=reads). This entry contains the data accompanying the publication entitled: ["A faecal microbiota signature with high specificity for pancreatic cancer"](https://gut.bmj.com/content/early/2022/01/26/gutjnl-2021-324755). For simplicity, in this tutorial we will compare the pancreatic cancer patients to healthy controls from a Spanish study cohort.
+
+## Metagenomics
+
+Shotgun metagenomics sequencing captures the microbial communities contained in a sample. It allows us to understand the extraordinary diversity present within microbial communities which is limited via standard culturing approaches. 
+
+## Loading packages and data in R
+
+We first load the packages that we will employ during the tutorial
+
+```{r, message=FALSE}
+library(knitr)
+library(tidyverse)
+library(reshape2)
+library(dplyr)
+library(plyr)
+library(ggrepel)
+library(ggplot2)
+library(ggpubr)
+library(pROC)
+library(car)
+library(vegan)
+library(SIAMCAT)
+library(SIAMCAT)
+```
