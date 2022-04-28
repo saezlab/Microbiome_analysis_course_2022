@@ -1,0 +1,121 @@
+---
+title: " Microbial Data Analysis Course"
+output: html_document 
+date: "15-03-2022"
+---
+
+This is the schedule for the practical session:
+
+- Beta diversity calculation (between sample diversity) & visualization: 40 minutes
+- Differential abundance analysis: 40 minutes
+- Break: 10 minutes
+
+## Loading packages and data in R
+
+We first load the packages that we will employ during the tutorial
+
+```{r, message=FALSE}
+library(knitr)
+library(tidyverse)
+library(reshape2)
+library(dplyr)
+library(plyr)
+library(ggrepel)
+library(ggplot2)
+library(ggpubr)
+library(pROC)
+library(car)
+library(vegan)
+library(SIAMCAT)
+
+set.seed(540832)
+```
+
+Next, we read the data tables that contain the count matrix and samples' metadata. 
+```{r, message=FALSE}
+# set the working directory
+setwd("~/Documents/SAEZ/teaching/Microbiome_analysis_course_2022/")
+load("data/mobi.Rdata")
+```
+
+################################################################################
+# Differential Abundance Analysis
+################################################################################
+
+# Normalization
+
+There are multiple factors that can result in libraries of different sizes. 
+Those include experimental variations, batch effects or simply, different sequencing depths. 
+We assume that, if it were not for these variations, all samples should have a similar 
+range and distribution of abundance Therefore, after data filtering, a normalization step 
+is necessary to ensure that species abundance can be compared between samples and experimental 
+conditions. Below, we use the relative abundance. There are other normalisation approaches described 
+in [Pereira et al. 2018](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4637-6).
+
+```{r}
+# apply normalization function
+motu.abs.rel <- prop.table(as.matrix(motu.abs), 2)
+motu.abs.fil.rel <- prop.table(as.matrix(motu.abs.fil), 2)
+```
+
+And have a look to how the normalized values look like:
+
+```{r}
+head(motu.abs.fil.rel)
+```
+
+
+# Differential Expression Analysis
+
+Next, we can analyze the differences between the transcriptomic profiles of both cell lines. To do so, we carry out what is known as Differential Expression Analysis (DEA). This is a statistical analysis where all species in the count matrix are compared between the sample groups of interest. To perform DEA, we use the `limma` package. `limma` was originally released as a software package to perform the statistical analysis of microarray data, but was later [adapted for the analysis of RNA-Seq](https://academic.oup.com/nar/article/43/7/e47/2414268). `limma` fits a linear model for each gene according to the experimental design to test the null hypothesis that no gene is differentially abundant between experimental conditions, and calculates a moderated *t*-statistic. To do so, it uses an empirical Bayes method to improve estimation of the underlying variance. For more information, please see "Shared global parameters link gene-wise models" and "Empirical Bayes borrows information between species" of the aforementioned paper. `limma` is not the only option to perform DEA. Common alternatives include [`edgeR`](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2796818/) and [`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8). The strategy that we employ here is known as limma-trend, where the initial count matrix is normalized using `edgeR` but the DEA is carried out with `limma`. For more information please see [Limma's users guide](https://www.bioconductor.org/packages/devel/bioc/vignettes/limma/inst/doc/usersguide.pdf).
+
+
+And look at the distribution of the adjusted P values:
+
+```{r}
+ggplot2::ggplot(de_table, aes(x = adj.P.Val)) +
+  ggplot2::geom_histogram()
+```
+
+**NOTE:** Do you remember how the P-value distribution should look like? If not, please see [here](http://varianceexplained.org/statistics/interpreting-pvalue-histogram/).
+
+Our P-value histogram clearly shows an anti-conservative distribution. We can also visualize the gene expression changes using one of the most common plots to explore DE results, the **volcano plot**:
+
+```{r}
+# set cutoffsa
+p_cutoff <- 0.0001
+fc_cutoff <- 2
+
+# annotate de_table with status according to cutoffs
+de_table <- de_table %>%
+  dplyr::mutate(
+    status = dplyr::case_when(
+      logFC >= fc_cutoff & adj.P.Val <= p_cutoff ~ "Up",
+      logFC <= -fc_cutoff & adj.P.Val <= p_cutoff ~ "Down",
+      TRUE ~ "Other"
+    )
+  )
+
+#  volcano plots
+ggplot2::ggplot(de_table, aes(x = logFC,-log10(adj.P.Val), color = status)) +
+  ggplot2::geom_point() +
+  ggplot2::geom_vline(xintercept = log2(c(0.25, 0.5, 2, 4)), lty = 2) +
+  ggplot2::geom_hline(yintercept = -log10(c(0.05, 0.01, 0.001, 0.0001)), lty = 2) +
+  ggplot2::scale_color_manual(values = c(
+    "Up" = "red",
+    "Down" = "blue",
+    "Other" = "black"
+  ))
+```
+
+A volcano plot enables us to quickly visualize the magnitude (logFC) and significance (-log10(pvalue)) of DE changes. Each point represent a gene, and its color indicates whether they surpass or not a cutoff of an absolute logFC > `r fc_cutoff` and an adjusted P value < `r p_cutoff`. 
+
+**QUESTION**: What do the horizontal and vertical dashed lines mean in this plot? Take a look at the code and think about their meaning. 
+
+**QUESTION**: Try to modify the `fc_cutoff` and and `p_cutoff` variables in this chunk. What happens? What cutoff values should we use? 
+
+# Functional analysis
+
+Thanks to the DEA, we know which species are different between the two cell lines, with measurements that indicate us the magnitude and the significance of the changes. But now we face one of the most prominent bottlenecks in the analysis of omics data: The extraction of biological insights that we can further interpret and link to a particular phenotype. A manual exploration of the species is not an option, given that our dataset comprises `r nrow(de_table)` species, from which `r sum(de_table$status == "Up" | de_table$status == "Down")` surpassed the previously established cutoffs. Hence, we need an approach that enable us to reduce the number of features to interpret, and that help us to link observation from our dataset with previous knowledge. Welcome to the **functional analysis section of the tutorial**.
+
+In the next steps, we employ **prior biological knowledge** retrieved from multiple biological resources. To perform the different analyses we employ the [decoupleR framework](https://github.com/saezlab/decoupleR), a recent development from the Saez-Rodriguez group which offers 12 different statistical approaches to perform the functional analysis of omics data. 
