@@ -1,0 +1,1 @@
+{"frames":[{"func":"quantile(log10(x + log.n0), probs = seq(0.1, 0.9, 0.05))","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0}],"message":"Error in quantile(log10(x + log.n0), probs = seq(0.1, 0.9, 0.05)) : \n  object 'log.n0' not found\n"}

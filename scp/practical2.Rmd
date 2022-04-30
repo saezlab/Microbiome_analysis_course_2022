@@ -1,0 +1,228 @@
+---
+title: " Microbial Data Analysis Course Part 2"
+output: html_document 
+date: "15-03-2022"
+---
+
+This is the schedule for the practical session:
+
+- Differential abundance analysis: 40 minutes
+- Break: 10 minutes
+- Break: 10 minutes
+- Machine learning modelling with SIAMCAT: 50 minutes
+- Conclusions: 10 minutes
+
+## Loading packages and data in R
+
+We first load the packages that we will employ during the tutorial
+
+```{r, message=FALSE}
+library(knitr)
+library(tidyverse)
+library(ggrepel)
+library(ggplot2)
+library(pROC)
+library(SIAMCAT)
+
+set.seed(540832)
+```
+
+Next, we read the data tables that contain the count matrix and samples' metadata. 
+```{r, message=FALSE}
+# set the working directory
+setwd("~/Documents/SAEZ/teaching/Microbiome_analysis_course_2022/")
+load("data/mobi.Rdata")
+folder.results= paste0(getwd(), "/results/")
+```
+
+################################################################################
+# Differential Abundance Analysis
+################################################################################
+
+## Normalization
+
+There are multiple factors that can result in libraries of different sizes. 
+Those include experimental variations, batch effects or simply, different sequencing depths. 
+We assume that, if it were not for these variations, all samples should have a similar 
+range and distribution of abundance. Therefore, after data filtering, a normalization step 
+is necessary to ensure that species abundance can be compared between samples and experimental 
+conditions. Below, we use the relative abundance. There are other normalisation approaches described 
+in [Pereira et al. 2018](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4637-6).
+
+```{r}
+# filter low abundant taxa
+motu.abs.fil <- motu.abs[rowSums(motu.abs >= 10^-5) >= 2, ]
+dim(motu.abs.fil)
+
+# apply normalization function
+motu.rel <- prop.table(as.matrix(motu.abs), 2)
+motu.fil.rel <- prop.table(as.matrix(motu.abs.fil), 2)
+```
+
+And have a look to how the normalized values look like:
+
+```{r}
+head(motu.fil.rel)
+```
+
+## Differential Abundance Analysis with Wilcoxin Test
+
+Next, we can analyze the differences between the microbiome profiles of both groups. To do so, we use `wilcoxin test` which is a statistical test where all species in the count matrix are compared between the sample groups of interest.  `wilcoxin test` is not the only option to perform Differential Abundance Analysis. Common alternatives include [`edgeR`](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2796818/) and [`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8).
+
+```{r}
+featTable = motu.fil.rel
+metaTable = meta
+metaTable$ID = rownames(metaTable)
+# define cutoffs
+p_cutoff = 0.05
+##############################################################################
+p.cal <- tribble(~ID, ~pval, ~adj.pval, ~log10.adj, ~aucs.mat, ~fc, ~sig)
+  
+for (rowname in row.names(featTable)) {
+  
+    # define matrix to compare
+    x <- as.numeric(featTable[rowname, metaTable %>% filter(status=='PC') %>% pull(ID)])
+    y <- as.numeric(featTable[rowname, metaTable %>% filter(status=='CTR') %>% pull(ID)])
+
+    # Fold change
+    q.p <- quantile(log10(x+1e-05), probs=seq(.1, .9, .05))
+    q.n <- quantile(log10(y+1e-05), probs=seq(.1, .9, .05))
+   
+    # create matrix
+    p.cal=add_row(p.cal, 
+                  ID = rowname,
+                  pval = wilcox.test(x, y, exact=FALSE)$p.value,
+                  aucs.mat = roc(controls=y, cases=x, direction='<', ci=TRUE, auc=TRUE)$ci[2], 
+                  fc = sum(q.p - q.n)/length(q.p))
+}
+
+# p.adjust
+p.cal <- p.cal %>% 
+  mutate(adj.pval = p.adjust(pval, method = "BH")) %>%
+  mutate(sig = ifelse(adj.pval < p_cutoff, "p.adj < 0.05", "not sig")) %>%
+  mutate(log10.adj = -log10(adj.pval))
+  
+# save file
+write.table(p.cal, file=paste0(folder.results, 'wilcox.results.tsv'), 
+            sep='\t', row.names=TRUE, col.names=TRUE)
+```
+
+And look at the distribution of the adjusted P values:
+
+```{r}
+ggplot2::ggplot(p.cal, aes(x = pval)) +
+  ggplot2::geom_histogram()
+```
+
+**NOTE:** Do you remember how the P-value distribution should look like? If not, please see [here](http://varianceexplained.org/statistics/interpreting-pvalue-histogram/).
+
+We can also visualize the abundance changes  using one of the most common plots to explore DAA results, the **volcano plot**:
+```{r}
+# Volcano plot 
+p.wilcox <- ggplot(p.cal, aes(x = fc, y = log10.adj)) +
+  geom_point(aes(color = sig), alpha=0.7) +
+  scale_color_manual(values = c("black","red")) +
+  # add a line for significance
+  geom_hline(yintercept=-log10(p_cutoff)) +
+  # add ID for significant species
+  geom_text_repel(data = subset(p.cal, adj.pval < p_cutoff), aes(label = ID), size = 3) +
+  # add axis labels 
+  ggtitle("Differentially abundant species") +
+  xlab("Generalized fold change") + 
+  ylab("Log10 adjusted p-value") +
+  theme_classic()
+  
+  print(p.wilcox)
+  # save plot
+  ggsave(p.wilcox, 
+         filename=paste0(folder.results, "wilcox.volcano.plot.pdf"))
+```
+
+
+A volcano plot enables us to quickly visualize the magnitude (logFC) and significance (-log10(pvalue)) of DAA changes. Each point represent a species, and its color indicates whether they surpass or not a cutoff of  an adjusted P value < `0.05`. 
+
+**QUESTION**: What do the horizontal dashed line mean in this plot? Take a look at the code and think about their meaning. 
+
+**QUESTION**: Try to modify the and `p_cutoff` variables in this chunk. What happens?
+
+################################################################################
+# Modelling by SIAMCAT
+################################################################################
+
+*SIAMCAT*  (Statistical Inference of Associations between Microbial Communities And host phenoTypes)[paper here](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02306-1) is a comprehensive toolbox for comparative metagenome analysis using ML, statistical modeling, and advanced visualization approaches.
+
+SIAMCAT needs 
+- a feature matrix (matrix or data.frame) 
+- features (in rows) samples (in columns)
+- metadata in a data.frame, samples as row names
+For microbiome studies, many issues arise from key characteristics of metagenomic data such as 
+- large technical and inter-individual variation
+- experimental bias, 
+- compositionality of relative abundances, 
+- zero inflation, 
+- non-Gaussian distribution, all of which necessitate data normalization in order for ML algorithms to work well.
+```{r}
+# define files and parameters
+meta.train <- meta
+feat.train <- motu.fil.rel
+test.meta <- c("Age", "BMI", "center", "smoking", "obesity")
+
+# start modelling
+siamcat <- siamcat(feat=feat.train, meta=meta.train, label = 'status', case='PC')
+# filter based on abundance
+siamcat <- filter.features(siamcat, filter.method = 'abundance', 
+                             cutoff=0.001, verbose=3)
+# check confounder effect
+check.confounders(siamcat, fn.plot = paste0(folder.results, 'confounders.pdf'),
+                  meta.in = test.meta, verbose = 3)
+# normalise count matrix
+siamcat <- normalize.features(siamcat, norm.method = "log.clr",
+                              norm.param = list(log.n0 = 1e-05, sd.min.q = 1),
+                              verbose=3)
+# compute associations 
+siamcat <- check.associations(siamcat, 
+                              feature.type = 'normalized', 
+                              detect.lim = 10e-5, 
+                              plot.type = "quantile.box",
+                              fn.plot = paste0(folder.results, 'assoc.plot.pdf'))
+# split data for nested cross validation  
+siamcat <- create.data.split(siamcat, num.folds = 10, num.resample = 10)
+# run model
+siamcat <- train.model(siamcat, method = "lasso_ll")
+# make predictions 
+siamcat <- make.predictions(siamcat)
+# evaluate model
+siamcat <- evaluate.predictions(siamcat)
+# evaluation plot based on AUROC
+model.evaluation.plot(siamcat, fn.plot = paste0(folder.results, 'evaluation.plot.pdf'))
+# interpretation plot with heatmap
+model.interpretation.plot(siamcat, 
+                          consens.thres = 0.5,
+                          detect.lim = 1e-05,
+                          heatmap.type = 'zscore',
+                          fn.plot = paste0(folder.results, 'interpret.plot.pdf'))
+  
+# save modelling matrix
+save(siamcat, file=paste0(folder.results, 'siamcat.lassoll.model.RData'))
+```
+## Adding 
+```{r}
+# add metadata to the feature matrix to be later used as predictors
+add.meta <- function(x, n){
+  x <- add.meta.pred(x, pred.names = n, verbose=3)
+  x <- train.model(x, method='lasso_ll', verbose=2, perform.fs = TRUE,
+                   param.fs = list(thres.fs=50, method.fs='gFC', 
+                                   direction='positive'))
+  x <- make.predictions(x)
+  x <- evaluate.predictions(x)
+  return(x)
+}
+# combine with naive model
+siamcat.smoking<- add.meta(siamcat, 'smoking')
+
+model.evaluation.plot('Only MetaG'= siamcat,
+                      'MetaG and smoking'= siamcat.smoking,
+                      fn.plot = paste0(folder.results, 'metag.smoking.combined.pdf'))
+
+```
+

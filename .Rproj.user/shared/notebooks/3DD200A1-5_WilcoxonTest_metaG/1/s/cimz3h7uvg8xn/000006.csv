@@ -1,0 +1,25 @@
+"0","  ##############################################################################
+  # calculate wilcoxon test and effect size for each feature
+  for (f in row.names(featTable)) {
+    
+    x <- as.numeric(featTable[f, metaTable %>% filter(status=='PC') %>% pull(ID)])
+    y <- as.numeric(featTable[f, metaTable %>% filter(status=='CTR') %>% pull(ID)])
+    
+    # Wilcoxon
+    p.val[f,1] <- wilcox.test(x, y, exact=FALSE)$p.value
+    
+    # AUC
+    aucs.all[[f]][[1]]  <- c(roc(controls=y, cases=x, 
+                                direction='<', ci=TRUE, auc=TRUE)$ci)
+    aucs.mat[f,1] <- c(roc(controls=y, cases=x, 
+                           direction='<', ci=TRUE, auc=TRUE)$ci)[2]
+    
+    # FC
+    q.p <- quantile(log10(x+log.n0), probs=seq(.1, .9, .05))
+    q.n <- quantile(log10(y+log.n0), probs=seq(.1, .9, .05))
+    fc[f,1] <- sum(q.p - q.n)/length(q.p)
+  }
+"
+"2","Error in quantile(log10(x + log.n0), probs = seq(0.1, 0.9, 0.05)) : 
+  object 'log.n0' not found
+"

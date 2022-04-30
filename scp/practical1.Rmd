@@ -1,5 +1,5 @@
 ---
-title: " Microbial Data Analysis Course"
+title: " Microbial Data Analysis Course Part 1"
 output: html_document 
 date: "15-03-2022"
 ---
@@ -11,6 +11,7 @@ This is the schedule for the practical session:
 - Rarefaction: 10 minutes
 - Alpha diversity calculation (within sample diversity) & visualization: 35 minutes
 - Break: 10 minutes
+- Beta diversity calculation (between sample diversity) & visualization: 40 minutes
 
 - Please clone the content of the following repository in your computer **the day before course**: https://github.com/saezlab/Microbiome_analysis_course_2022.git
 - The following code chunk takes care of checking and installing those packages in your R installation. Please run it from your computer: 
@@ -64,6 +65,7 @@ Next, we read the data tables that contain the count matrix and samples' metadat
 # set the working directory
 setwd("~/Documents/SAEZ/teaching/Microbiome_analysis_course_2022/")
 load("data/mobi.Rdata")
+folder.results= paste0(getwd(), "/results/")
 ```
 
 Next, we can explore how the first rows of the count matrix look like. In this matrix, rows correspond to species and columns represent samples.

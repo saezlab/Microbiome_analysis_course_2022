@@ -1,0 +1,957 @@
+---
+title: "Pancreatic Cancer Model testing on External Cohort"
+author: "Ece Kartal"
+date: "2.5.2019"
+output: html_document
+---
+SIAMCAT needs a feature matrix (matrix or data.frame) 
+features (in rows) samples (in columns)
+metadata in a data.frame, samples as row names
+
+```{r setup, include=FALSE}
+#module add R/3.6.1-modules-v2
+require("knitr")
+library("tidyverse")
+library("matrixStats")
+library("SIAMCAT")
+library("ggrepel")
+library("dplyr")
+library("plyr")
+library("readxl")
+library(pROC)
+library(reshape2)
+packageVersion("SIAMCAT")
+
+PARAM <- list()
+PARAM$folder.R <- paste0(getwd(), "/")
+PARAM$folder <- gsub("Rmd/", "", PARAM$folder.R)
+PARAM$folder.metadata <- paste0(PARAM$folder, "metadata/")
+PARAM$folder.Rdata <- paste0(PARAM$folder, "Rdata/")
+PARAM$folder.data <- paste0(PARAM$folder, "data/")
+PARAM$folder.results <- paste0(PARAM$folder, "results/")
+log.n0.func = 1e-08 #functions
+# load data metag motu and genes
+load(paste0(PARAM$folder.Rdata, "metag.pc.siamcat.file.RData"))
+#load(paste0(PARAM$folder.Rdata, "metag.pc.genes.siamcat.Rdata"))
+#load 16s data
+#load(paste0(PARAM$folder.Rdata, "16S.data.otu.nonfiltered.RData"))
+#load(paste0(PARAM$folder.Rdata, "16S.data.asv.nonfiltered.RData"))
+```
+
+Function to run siamcat with centered log transformation (clr) normalization
+10 fold cross validation and 10 fold re-sampling
+Confounder check based on fisher exact test
+
+```{r}
+runsiamcat.pos <- function(featTable, metaTable, fileName, case, ml, norm, cutoff.p, thres.fs, method.fs){
+  dim(featTable)
+  fileName=paste(fileName, ml,'.', norm,'.', cutoff.p, '.', thres.fs, '.', method.fs, '.')
+  print(fileName)
+  # create SIAMCAT object and classify
+  siamcat <- siamcat(feat=featTable, meta=metaTable, label="status", case=case)
+  # filter
+  siamcat <- filter.features(siamcat, filter.method = 'abundance', 
+                            cutoff=0.001, verbose=3)
+  siamcat <- filter.features(siamcat, filter.method = 'prevalence', cutoff = cutoff.p,
+                            feature.type = 'filtered', verbose=3)
+        
+  # check.confounders(siamcat, fn.plot = paste0(PARAM$folder.results, 
+  #                           fileName, 'confounders.pdf'),
+  #                           meta.in=metatest, verbose = 3)
+  #       
+  # normalize with log.clr
+  siamcat <- normalize.features(siamcat, norm.method = norm, feature.type = 'filtered',
+                                norm.param = list(log.n0=1e-05, sd.min.q=1))
+                                      
+  # compute associations 
+  siamcat <- check.associations(siamcat, feature.type = 'normalized', 
+                                detect.lim = 10^-5, plot.type = "quantile.box",
+                                fn.plot = paste0(PARAM$folder.results, 
+                                          Sys.Date(), '.', fileName,'assoc.plot.pdf'))
+        
+  # train model
+  siamcat <- create.data.split(siamcat, num.folds =10, num.resample = 10)  
+  #siamcat <- train.model(siamcat, method = ml, verbose = 2)
+        
+  siamcat <- train.model(siamcat, method=ml, verbose = 2,
+                         perform.fs = TRUE,
+                         modsel.crit = list('pr'),
+                         param.fs = list(thres.fs = thres.fs,
+                                         method.fs = method.fs,
+                                         direction='positive'))
+
+  siamcat <- make.predictions(siamcat)
+  siamcat <- evaluate.predictions(siamcat)    
+  print(siamcat@eval_data$auroc)
+  # evaluation plot
+  model.evaluation.plot(siamcat, fn.plot = paste0(PARAM$folder.results, Sys.Date(), '.',
+                                                  fileName, 'eval.plot.pdf'))
+  # interpretation plot
+  model.interpretation.plot(siamcat, fn.plot = paste0(PARAM$folder.results, 
+                           Sys.Date(), '.', fileName,'interpret.plot.pdf'),
+                            consens.thres = 0.5, # 0.01 for randomForest
+                            detect.lim = 1e-05,
+                            heatmap.type = 'zscore')
+        
+  # save siamcat object
+  save(siamcat, file = paste0(PARAM$folder.results, Sys.Date(), '.', fileName, 'siamcat.Rdata'))
+  return(siamcat) 
+}
+
+
+###############################################################################
+runsiamcat <- function(featTable, metaTable, fileName, case, ml, norm, cutoff.p){
+  dim(featTable)
+  fileName=paste(fileName, ml,'.', norm,'.', cutoff.p, '.')
+  print(fileName)
+  # create SIAMCAT object and classify
+  siamcat <- siamcat(feat=featTable, meta=metaTable, label="status", case=case)
+  # filter
+  siamcat <- filter.features(siamcat, filter.method = 'abundance', 
+                            cutoff=0.001, verbose=3)
+  siamcat <- filter.features(siamcat, filter.method = 'prevalence', cutoff = cutoff.p,
+                            feature.type = 'filtered', verbose=3)
+        
+  # check.confounders(siamcat, fn.plot = paste0(PARAM$folder.results, 
+  #                           fileName, 'confounders.pdf'),
+  #                           meta.in=metatest, verbose = 3)
+  #       
+  # normalize with log.clr
+  siamcat <- normalize.features(siamcat, norm.method = norm, feature.type = 'filtered',
+                                norm.param = list(log.n0=1e-05, sd.min.q=1))
+                                      
+  # compute associations 
+  # siamcat <- check.associations(siamcat, feature.type = 'normalized', 
+  #                               detect.lim = 10^-5, plot.type = "quantile.box",
+  #                               fn.plot = paste0(PARAM$folder.results, 
+  #                                         Sys.Date(), '.', fileName,'assoc.plot.pdf'))
+        
+  # train model
+  siamcat <- create.data.split(siamcat, num.folds =10, num.resample = 10)  
+  siamcat <- train.model(siamcat, method = ml, verbose = 2, param.set=list('alpha'=0.5))
+  siamcat <- make.predictions(siamcat)
+  siamcat <- evaluate.predictions(siamcat)    
+  print(siamcat@eval_data$auroc)
+  # evaluation plot
+  model.evaluation.plot(siamcat, fn.plot = paste0(PARAM$folder.results, Sys.Date(), '.',
+                                                  fileName, 'eval.plot.pdf'))
+  # interpretation plot
+  model.interpretation.plot(siamcat, fn.plot = paste0(PARAM$folder.results, 
+                           Sys.Date(), '.', fileName,'interpret.plot.pdf'),
+                            consens.thres = 0.5, # 0.01 for randomForest
+                            detect.lim = 1e-05,
+                            heatmap.type = 'zscore')
+        
+  # save siamcat object
+  save(siamcat, file = paste0(PARAM$folder.results, Sys.Date(), '.', fileName, 'siamcat.Rdata'))
+  return(siamcat) 
+}
+```
+
+```{r}
+# check stage specific changes
+stage<- meta.st.cancer %>% filter(stage!="")
+feat.stage <- feat.st.rel.cancer.3mg[, match(rownames(stage), colnames(feat.st.rel.cancer.3mg))]
+
+dim(feat.stage)
+head(feat.stage)
+dim(stage)
+# combine stages
+stage <- stage %>%  
+  mutate(stage.n=dplyr::recode(stage, '1'=1, '2'=1,'3'=3, '4'=3))
+
+
+a=runsiamcat(feat.stage, stage, "pc.st.stage", "1", "lasso_ll", "log.clr", "0")
+
+```
+
+###############################################################################
+Spanish MetaG Taxonomic Modelling
+###############################################################################
+
+```{r}
+# choose the meta variables to test
+metatest <- c("jaundice", "diabetes","asthma", "acid", "rheumatoid arthritis", 
+              "library_size", "center", "periodontitis", "age", "smoking", "acid_med",
+              "bilirubin_direct","directB_comp", "totalB_comp", "alcohol_status", 
+              "antibiotic", "metformin","obesitiy", "salicylic_med", "allhburn",
+              "probiotic","heartburn", "cholesterol", "receding gums", "coded_ca19", "CA19")
+
+metatest <- c("stage","library_size", "center", "age", "jaundice", 
+              "totalB_comp", "diabetes", "obesitiy", "coded_ca19", "CA19", 
+              "alcohol_status", "smoking", "periodontitis",  "cholesterol")
+# run siamcat
+# stoolthres.fs, method.fs
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.03", 200, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.05", 200, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0", 200, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.03", 100, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.05", 100, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0", 100, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.03", 50, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.05", 50, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0", 50, "gFC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.03", 200, "AUC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.05", 200, "AUC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0", 200, "AUC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.05", 100, "AUC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0", 100, "AUC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0.05", 50, "AUC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0", 50, "AUC")
+
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.std", "0.03")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pos.pc.st.cancer.3mg.", "PC","lasso_ll", "log.std", "0.05")
+
+runsiamcat(feat.st.rel.cancer.2mg, meta.st.cancer, "pos.pc.st.cancer.2mg.", "PC","lasso_ll", "log.clr", "0.03")
+runsiamcat(feat.st.rel.cancer.2mg, meta.st.cancer, "pos.pc.st.cancer.2mg.", "PC","lasso_ll", "log.clr", "0.05")
+runsiamcat(feat.st.rel.cancer.2mg, meta.st.cancer, "pos.pc.st.cancer.2mg.", "PC","lasso_ll", "log.clr", "0")
+runsiamcat(feat.st.rel.cancer.2mg, meta.st.cancer, "pos.pc.st.cancer.2mg.", "PC","lasso_ll", "log.std", "0.03")
+runsiamcat(feat.st.rel.cancer.2mg, meta.st.cancer, "pos.pc.st.cancer.2mg.", "PC","lasso_ll", "log.std", "0.05")
+
+
+# saliva
+runsiamcat(feat.or.rel.cancer.2mg, meta.or.cancer, "pc.or.cancer.2mg.", "PC","lasso_ll", "log.clr", "0")
+runsiamcat(feat.or.rel.cancer.3mg, meta.or.cancer, "pc.or.cancer.3mg.", "PC","lasso_ll", "log.clr", "0")
+runsiamcat(feat.st.rel.pc.3mg, meta.st.pc, "pc.st.CPvsCTR.3mg.", "Pancreatitis","lasso_ll", "log.clr", "0")
+temp=meta.st[meta.st$status!="CTR",]
+feat.st.relpdac.cp.3mg=feat.st.rel.total.3mg[,rownames(temp)]
+runsiamcat(feat.st.relpdac.cp.3mg, temp, "pc.st.PDACvsCP.3mg.", "PC","lasso_ll", "log.clr", "0")
+
+# total 
+runsiamcat(feat.total.cancer.2mg, meta.total.cancer, "pc.total.cancer.2mg.", "PC", "lasso_ll", "log.clr", "0")
+runsiamcat(feat.total.cancer.2mg, meta.total.cancer, "pc.total.cancer.2mg.", "PC", "lasso_ll", "log.clr", "0.05")
+runsiamcat(feat.total.cancer.2mg, meta.total.cancer, "pc.total.cancer.2mg.", "PC", "lasso_ll", "log.std", "0")
+runsiamcat(feat.total.cancer.2mg, meta.total.cancer, "pc.total.cancer.2mg.", "PC", "lasso_ll", "log.std", "0.05")
+
+runsiamcat(feat.total.cancer.3mg, meta.total.cancer, "pc.total.cancer.3mg.", "PC", "lasso_ll", "log.clr", "0.03")
+runsiamcat(feat.total.cancer.3mg, meta.total.cancer, "pc.total.cancer.3mg.", "PC", "lasso_ll", "log.clr", "0.05")
+runsiamcat(feat.total.cancer.3mg, meta.total.cancer, "pc.total.cancer.3mg.", "PC", "lasso_ll", "log.std", "0.03")
+runsiamcat(feat.total.cancer.3mg, meta.total.cancer, "pc.total.cancer.3mg.", "PC", "lasso_ll", "log.std", "0.05")
+
+runsiamcat(feat.total.3mg, meta.total, "pc.total.3mg.", "cancer")
+runsiamcat(feat.total.2mg, meta.total, "pc.total.2mg.", "cancer")
+
+runsiamcat(feat.st.rel.total.2mg, meta.st.temp, "pc.st.total.2mg.", "cancer")
+runsiamcat(feat.st.rel.total.3mg, meta.st.temp, "pc.st.total.3mg.", "cancer", "lasso_ll", "log.clr", "0.03")
+runsiamcat(feat.st.rel.total.3mg, meta.st.temp, "pc.st.total.3mg.", "cancer", "lasso_ll", "log.clr", "0.05")
+runsiamcat(feat.st.rel.total.3mg, meta.st.temp, "pc.st.total.3mg.", "cancer", "lasso_ll", "log.std", "0.03")
+runsiamcat.pos(feat.st.rel.total.3mg, meta.st.temp, "pc.st.total.3mg.", "cancer", "lasso_ll", "log.clr", "0", 50, "gFC")
+runsiamcat.pos(feat.st.rel.total.3mg, meta.st.temp, "pc.st.total.3mg.", "cancer", "lasso_ll", "log.clr", "0", 100, "gFC")
+runsiamcat.pos(feat.st.rel.total.3mg, meta.st.temp, "pc.st.total.3mg.", "cancer", "lasso_ll", "log.clr", "0", 200, "gFC")
+
+runsiamcat(feat.or.rel.total.3mg, meta.or.temp, "pc.or.total.3mg.", "cancer")
+runsiamcat(feat.or.rel.total.2mg, meta.or.temp, "pc.or.total.2mg.", "cancer")
+# stool
+runsiamcat(feat.st.rel.cancer.2mg, meta.st.cancer, "pc.st.cancer.2mg.", "PC")
+runsiamcat(feat.st.rel.cancer.3mg, meta.st.cancer, "pc.st.cancer.3mg.trial", "PC", "lasso_ll", "log.clr", "0")
+# saliva
+runsiamcat(feat.or.rel.cancer.2mg, meta.or.cancer, "pc.or.cancer.2mg.", "PC")
+runsiamcat(feat.or.rel.cancer.3mg, meta.or.cancer, "pc.or.cancer.3mg.", "PC")
+# pancreatitis
+runsiamcat(feat.st.rel.pc.2mg, meta.st.pc, "pc.st.pancreatitis.2mg.pos.", "Pancreatitis")
+runsiamcat(feat.or.rel.pc.2mg, meta.or.pc, "pc.or.pancreatitis.2mg.pos.", "Pancreatitis")
+runsiamcat(feat.st.rel.pc.3mg, meta.st.pc, "pc.st.pancreatitis.3mg.pos.", "Pancreatitis")
+runsiamcat(feat.or.rel.pc.3mg, meta.or.pc, "pc.or.pancreatitis.3mg.pos.", "Pancreatitis")
+```
+
+###############################################################################
+Spanish MetaG Fucntional Modelling
+###############################################################################
+
+```{r}
+siamcat=siamcat.ca19.N10
+
+pred <- rowMeans(pred_matrix(siamcat))
+ threshold <- siamcat@eval_data$roc$thresholds[
+     which(siamcat@eval_data$roc$specificities > 0.90)[1]]
+ 
+ pred=as.data.frame(pred)
+ rownames(pred) <- colnames(siamcat@phyloseq@otu_table)
+ pred = merge(pred, meta.st.cancer, by="row.names", all.x=TRUE)
+ table(pred$stage)
+ 
+ pred <- pred %>%  
+  mutate(stage.n=dplyr::recode(stage,  "1"=1,"2"=1,"3"=3,"4"=3))
+ 
+stage=pred$stage.n
+ df.fpr <- tibble(pred=pred$pred, Group=(label(siamcat))[[1]], stage=stage)
+ df.fpr <- df.fpr %>% 
+     group_by(stage) %>% 
+     dplyr::summarise(n=n(), 
+                      pred.pos=sum(pred>threshold), 
+                      pred.neg=sum(pred < threshold)) %>% 
+     ungroup() %>% 
+     mutate(fpr=pred.pos/n)
+ 
+#df.fpr.ca19.m1=df.fpr
+df.fpr.m1=df.fpr
+#df.fpr.c19.m2=df.fpr
+#df.fpr.aug =df.fpr
+df.fpr.m2 =df.fpr
+df.fpr.aug =df.fpr
+df.fpr.aug.pos =df.fpr
+
+ df.fpr.ca19.m1$model="Model1+ca19"
+ df.fpr.m1$model="Model1"
+ df.fpr.c19.m2$model = "Model 2+ca19"
+ df.fpr.aug$model = "Augmented"
+ df.fpr.m2$model="Model2"
+ df.fpr.aug$model<- "Augmented"
+  df.fpr.aug.pos$model<- "Augmented positive"
+
+df= rbind(df.fpr.ca19.m1,df.fpr.m1,df.fpr.c19.m2,df.fpr.aug,df.fpr.m2)
+df= rbind(df.fpr.m1,df.fpr.m2,df.fpr.aug,df.fpr.aug.pos)
+df$TPR<- df$fpr
+ # plot tpr
+ p.tpr <- ggplot(data=df, aes(x=stage, y=TPR, fill=stage)) + 
+  geom_col(alpha=0.8) + 
+  theme_classic()  +  facet_grid(cols = vars(model), scales = "free") 
+
+ggsave(p.tpr, filename=paste0(PARAM$folder.results, "augmented.stage.tpr.barplot.pdf"), 
+         width = 5, height=8)
+
+```
+
+###############################################################################
+Spanish 16S rRNA Modelling
+###############################################################################
+
+```{r}
+# 16S modelling
+# meta.16or$subject_disease_status <- str_replace_all(meta.16or$subject_disease_status, 
+#                                     c('PC'='PC',
+#                                      'CTR'='CTR',
+#                                      'Pancreatitis'='CTR'))
+# meta.16st$subject_disease_status <- str_replace_all(meta.16st$subject_disease_status, 
+#                                     c('PC'='PC',
+#                                      'CTR'='CTR',
+#                                      'Pancreatitis'='CTR'))
+meta.16 = amplicon %>%
+  filter(str_detect(sample_alias, '^MMPC-310')) %>%
+  filter(subject_disease_status!='Pancreatitis') 
+
+meta.16.st =  meta.16 %>%
+  filter(str_detect(experiment_name, 'ST$') )%>% 
+  remove_rownames %>% 
+  column_to_rownames(var="experiment_name")
+meta.16.or =  meta.16 %>%
+  filter(str_detect(experiment_name, 'OR$')) %>%
+  remove_rownames %>% 
+  column_to_rownames(var="experiment_name")
+#meta.16.st = meta.16.st[ match(rownames(meta.16.st), colnames(data.otu)),]
+
+# open-ref
+data.otu.rel= prop.table(as.matrix(data.otu), 2)
+st.16s = data.otu.rel[, match(rownames(meta.16.st), colnames(data.otu.rel))]
+or.16s= data.otu.rel[, match(rownames(meta.16.or), colnames(data.otu.rel))]
+dim(st.16s)
+dim(or.16s)
+runsiamcat(st.16s, meta.16.st, "st.16s.", "PC")
+runsiamcat(or.16s, meta.16.or, "or.16s.", "PC")
+
+#asv
+data.asv.rel=prop.table(as.matrix(data.asv), 2)
+st.16s = data.asv.rel[, match(rownames(meta.16.st),colnames(data.asv.rel))]
+or.16s = data.asv.rel[, match(rownames(meta.16.or),colnames(data.asv.rel))]
+dim(st.16s)
+dim(or.16s)
+runsiamcat(st.16s, meta.16.st, "st.16s.asv.", "PC")
+runsiamcat(or.16s, meta.16.or, "or.16s.asv.", "PC")
+```
+
+###############################################################################
+Japanese Cohort Modelling
+###############################################################################
+```{r modelling japanese cohort}
+folder.data <- paste0(PARAM$folder.data, "jp_motus_v2.5/")
+# load japanese cohort
+temp = list.files(path=folder.data, pattern=c("^mg2.|^mg3." ))
+for (i in 1:length(temp)) assign(temp[i], read.csv(paste0(folder.data, temp[i]), 
+                                                   sep = "\t",
+                                                   row.names=1))
+# combine dataset per mg 
+jp.mg2 <- bind_cols(mg2.feces1.motusv2_5.insertcount.tsv, 
+                    mg2.feces2.motusv2_5.insertcount.tsv,
+                    mg2.saliva1.motusv2_5.insertcount.tsv,
+                    mg2.saliva2.motusv2_5.insertcount.tsv)
+jp.mg3 <- bind_cols(mg3.feces1.motusv2_5.insertcount.tsv, 
+                    mg3.feces2.motusv2_5.insertcount.tsv,
+                    mg3.saliva1.motusv2_5.insertcount.tsv,
+                    mg3.saliva2.motusv2_5.insertcount.tsv)
+rownames(jp.mg2) <- rownames(mg2.feces1.motusv2_5.insertcount.tsv)
+rownames(jp.mg3) <- rownames(mg2.feces1.motusv2_5.insertcount.tsv)
+rownames(jp.mg2) <- str_replace_all(rownames(jp.mg2), 
+                                    c("ef_mOTU_v25" = "", 
+                                      "incertae sedis" = "", 
+                                      "eta_mOTU_v25" = ""))
+rownames(jp.mg3) <- str_replace_all(rownames(jp.mg3), 
+                                    c("ef_mOTU_v25" = "", 
+                                      "incertae sedis" = "", 
+                                      "eta_mOTU_v25" = ""))
+
+# load metadata
+meta.jp <- read_excel(paste0(PARAM$folder.metadata, "external/jp_metadata.xlsx"))
+rownames(meta.jp)= meta.jp$Sample
+meta.jp$Sample<- NULL
+meta.jp=as.data.frame(meta.jp)
+
+meta.jp.st <- meta.jp[str_detect(rownames(meta.jp), "^PF"),]
+meta.jp.or <- meta.jp[str_detect(rownames(meta.jp), "^PS"),]
+# save jp data
+# save(meta.jp.st, meta.jp.or, jp.mg3, jp.mg2,
+#      file=paste0(PARAM$folder.Rdata, "japanese.data.Rdata"))
+load(paste0(PARAM$folder.Rdata, "japanese.data.Rdata"))
+
+# run siamcat
+runsiamcat.jp <- function(featTable, fileName1, fileName2){
+  feat.jp <- prop.table(as.matrix(featTable), 2)
+  feat.jp.st <- feat.jp[, match(rownames(meta.jp.st), colnames(feat.jp))]
+  feat.jp.or <- feat.jp[, match(rownames(meta.jp.or), colnames(feat.jp))]
+
+  # run siamcat function 
+  runsiamcat(feat.jp.st, meta.jp.st, fileName1, "PC", "lasso_ll", "log.clr", "0")
+  runsiamcat(feat.jp.or, meta.jp.or, fileName2, "PC", "lasso_ll", "log.clr", "0")
+}
+
+metatest <- c("Low quality", "Human","Phix", "Filter-passed")
+
+# run siamcat for japanese data
+runsiamcat.jp(jp.mg3, "jp.st.log.clr.lasso_ll.0.mg3.","jp.or.log.clr.lasso_ll.0.mg3.")
+runsiamcat.jp(jp.mg2, "jp.st.log.clr.lasso_ll.0.mg2.","jp.or.log.clr.lasso_ll.0.mg2.")
+```
+
+```{r}
+# combine spanish and japanese cohorts to see the effect
+feat.jp.mg2 <- prop.table(as.matrix(jp.mg2), 2)
+feat.jp.st.mg2 <- feat.jp.mg2[, match(rownames(meta.jp.st), colnames(feat.jp.mg2))]
+feat.jp.mg3 <- prop.table(as.matrix(jp.mg3), 2)
+feat.jp.st.mg3 <- feat.jp.mg3[, match(rownames(meta.jp.st), colnames(feat.jp.mg3))]
+# combine feat tables
+feat.st.mg.com2 <- cbind(feat.st.rel.cancer.2mg, feat.jp.st.mg2)
+feat.st.mg.com3 <- cbind(feat.st.rel.cancer.3mg, feat.jp.st.mg3)
+# combine metadata
+a =meta.jp.st[5]
+a <- a %>%
+     mutate(subject_disease_status=replace(subject_disease_status, subject_disease_status=="HC", "CTR")) %>%
+     as.data.frame()
+rownames(a) <- rownames(meta.jp.st)
+names(meta.st.cancer)[names(meta.st.cancer) == "status"] <- "subject_disease_status"
+b =meta.st.cancer[2]
+meta.com.st <- rbind(b,a)
+meta.com.st$aa <-"sd"
+# run siamcat lasso_ll
+runsiamcat(feat.st.mg.com2, meta.com.st, "sp.jp.combined.logstd.lasso_ll.mg2", "PC")
+runsiamcat(feat.st.mg.com3, meta.com.st, "sp.jp.combined.logstd.lasso_ll.mg3", "PC")
+```
+
+###############################################################################
+Test Spanish PC model on Japanese Cohort
+###############################################################################
+```{r}
+# load pc japanese model
+load(paste0(PARAM$folder.Rdata, "/japanese.data.Rdata"))
+feat.jp <- prop.table(as.matrix(jp.mg2), 2)
+meta.jp.pc <- meta.jp.st[str_detect(meta.jp.st$subject_disease_status, "^PC"),]
+meta.jp.ctr <- meta.jp.st[str_detect(meta.jp.st$subject_disease_status, "^HC"),]
+feat.jp.st <- feat.jp[, match(rownames(meta.jp.st), colnames(feat.jp))]
+
+# test spanish model on holdout set
+holdout.test <- function(sc, sc.holdout){
+  sc.holdout <- normalize.features(sc.holdout,
+                                        norm.param=norm_params(sc),
+                                        feature.type='original',
+                                        verbose = 2)
+  
+  sc.holdout <- make.predictions(siamcat=sc, 
+                                 siamcat.holdout = sc.holdout, 
+                                 normalize.holdout = FALSE)
+  
+  sc.holdout <- evaluate.predictions(sc.holdout)
+  pred <- rowMeans(pred_matrix(sc.holdout))
+  
+  # find threshold
+  threshold <- sc@eval_data$roc$thresholds[
+  which(sc@eval_data$roc$specificities > 0.95)[1]]
+  
+  # calculate FPR
+  df.fpr <- tibble(pred=pred, Group=(label(sc.holdout))[[1]])
+
+  df.fpr <- df.fpr %>%
+    group_by(Group) %>%
+    dplyr::summarise(n=n(),
+                 pred.pos=sum(pred > threshold),
+                 pred.neg=sum(pred < threshold)) %>%
+    ungroup() %>%
+    mutate(fpr=pred.pos/n)
+  return(sc.holdout)
+}
+
+# run holdout.test
+siamcat.holdout <- holdout.test(siamcat.pc, siamcat.jp)
+siamcat.holdout.pos <- holdout.test(siamcat.pc.pos, siamcat.jp)
+siamcat.holdout.pos1 <- holdout.test(siamcat.pc, sc.holdout)
+```
+
+```{r}
+# plot ROCs
+get.roc <- function(sc, name){
+  pred <- rowMeans(pred_matrix(sc))
+  label <- sc@label$label
+  roc.obj <- roc(predictor=pred, response=label)
+  df.return <- tibble(sensitivity=roc.obj$sensitivities,
+                      specificitiy=roc.obj$specificities,
+                      name=name,
+                      auroc=roc.obj$auc)
+}
+# plot original models for DE-1
+df.plot <- bind_rows(get.roc(siamcat.pc, 'Spanish AUC:'),
+                     get.roc(siamcat.pc.pos, 'Spanish pos AUC:'),
+                     get.roc(siamcat.jp, 'Japanese AUC:'),
+                     get.roc(siamcat.holdout, 'JP holdout AUC:'),
+                     get.roc(siamcat.holdout.pos, 'JP holdout pos AUC:'))
+
+p <- df.plot %>% 
+  arrange(sensitivity) %>% 
+  mutate(label=paste0(name, ' ', sprintf(fmt='%.2f', auroc))) %>% 
+  ggplot(aes(x=specificitiy, y=sensitivity, col=label)) + 
+    geom_abline(intercept = 1, slope = 1, col='black', lty=3) +
+    geom_line() + 
+    #scale_color_tableau(name='') + 
+    xlab('Specificity') + 
+    ylab('Sensitivity') + 
+    theme_bw() + 
+    scale_x_reverse() +
+    theme(panel.grid.minor = element_blank(),
+          aspect.ratio = 1,
+          legend.position = c(0.65, 0.2), legend.title = element_blank())
+# save the plots
+ggsave(p,  filename = paste0(folder.results, 'roc.japanese.spanish.holdout.pdf'), width = 5.5, height = 4.5)
+```
+###############################################################################
+Add external controls
+###############################################################################
+```{r}
+# insert chinese controls to spanish cohorts
+# subset only specific group
+  chinese.ctr <- Qin_2012_Chinese.T2D.tsv[Qin_2012_Chinese.T2D.tsv$subject_disease_status %in% "CTR", ]
+  dim(chinese.ctr)  
+  meta.holdout <- as.data.frame(chinese.ctr[,18])
+  colnames(meta.holdout) <- "status"
+  rownames(meta.holdout) <- chinese.ctr$ena_ers_sample_id
+
+  meta.sp <- as.data.frame(meta.st.cancer[,2])
+  rownames(meta.sp) <- rownames(meta.st.cancer)
+  colnames(meta.sp) <- "status"
+
+  meta.comb <- rbind(meta.sp, meta.holdout)
+  meta.comb$aaa <-"random"
+  # get feat table
+  feat.holdout <- Qin_2012_mg3.tsv[, match(chinese.ctr$ena_ers_sample_id, colnames(Qin_2012_mg3.tsv))]
+  dim(feat.holdout)
+  rownames(feat.holdout) <- str_replace_all(rownames(feat.holdout), 
+                                      c("ef_mOTU_v25" = "", 
+                                        "incertae sedis" = "", 
+                                        "eta_mOTU_v25" = ""))
+  feat.holdout <- feat.holdout[!row.names(feat.holdout) %in% ("-1"), ]
+
+  feat.holdout <- prop.table(as.matrix(feat.holdout),2)
+  dim(feat.holdout)
+  
+  feat.comb <- cbind(feat.st.rel.cancer.3mg,feat.holdout)
+  head(feat.comb)
+runsiamcat(feat.comb, meta.comb, "pc.st.chinese.ctr.combined.pos.3mg.", "PC","lasso_ll", "log.clr", "0.05")
+
+################################################
+# use fijicomb controls
+  ctr <- FijiCOMP.tsv[FijiCOMP.tsv$subject_disease_status %in% "CTR", ]
+  dim(ctr)  
+  meta.holdout <- as.data.frame(ctr[,18])
+  colnames(meta.holdout) <- "status"
+  rownames(meta.holdout) <- ctr$sample_alias
+  meta.comb <- rbind(meta.sp, meta.holdout)
+  meta.comb$aaa <-"random"
+  # get feat table
+  feat.holdout <- FijiCOMP_mg3.tsv[, match(FijiCOMP.tsv$sample_alias, colnames(FijiCOMP_mg3.tsv))]
+  dim(feat.holdout)
+  rownames(feat.holdout) <- str_replace_all(rownames(feat.holdout), 
+                                      c("ef_mOTU_v25" = "", 
+                                        "incertae sedis" = "", 
+                                        "eta_mOTU_v25" = ""))
+  feat.holdout <- feat.holdout[!row.names(feat.holdout) %in% ("-1"), ]
+
+  feat.holdout <- prop.table(as.matrix(feat.holdout),2)
+  dim(feat.holdout)
+  
+  feat.comb <- cbind(feat.st.rel.cancer.3mg,feat.holdout)
+  dim(feat.comb)
+  runsiamcat(feat.comb, meta.comb, "pc.st.fiji.ctr.combined.3mg.", "PC","lasso_ll", "log.clr", "0.05")
+  ################################################
+# use dudenhofer controls
+  ctr <- Dudenhoeffer_2018.tsv[Dudenhoeffer_2018.tsv$subject_disease_status %in% "CTR", ]
+  dim(ctr)  
+  meta.holdout <- as.data.frame(ctr[,19])
+  colnames(meta.holdout) <- "status"
+  rownames(meta.holdout) <- ctr$sample_alias
+  meta.comb <- rbind(meta.sp, meta.holdout)
+  meta.comb$aaa <-"random"
+  dim(meta.comb)
+  # get feat table
+  feat.holdout <- Dudenhoeffer_2018_mg3.tsv[, match(Dudenhoeffer_2018.tsv$sample_alias, colnames(Dudenhoeffer_2018_mg3.tsv))]
+  feat.holdout <- prop.table(as.matrix(feat.holdout),2)
+  dim(feat.holdout)
+  keep.cols = which(apply(!is.na(feat.holdout), 2, all))
+  feat.holdout = feat.holdout[, keep.cols]
+  dim(feat.holdout)
+  rownames(feat.holdout) <- str_replace_all(rownames(feat.holdout), 
+                                      c("ef_mOTU_v25" = "", 
+                                        "incertae sedis" = "", 
+                                        "eta_mOTU_v25" = ""))
+  feat.holdout <- feat.holdout[!row.names(feat.holdout) %in% ("-1"), ]
+  feat.comb <- cbind(feat.st.rel.cancer.3mg, feat.holdout)
+  dim(feat.comb)
+  runsiamcat(feat.comb, meta.comb, "pc.st.dudenhoeffer.ctr.combined.3mg.", "PC","lasso_ll", "log.clr", "0.05")
+```
+
+###############################################################################
+Add confounders to model
+###############################################################################
+
+```{r}
+runsiamcat(feat.or.rel.cancer.2mg, meta.or.cancer, "pc.or.cancer.2mg.", "PC","lasso_ll", "log.clr", "0")
+runsiamcat(feat.or.rel.cancer.3mg, meta.or.cancer, "pc.or.cancer.3mg.", "PC","lasso_ll", "log.clr", "0")
+
+metatest <- c("status", "stage","library_size", "center", "age", "jaundice", 
+              "totalB_comp", "diabetes", "obesitiy", "coded_ca19", "CA19", 
+              "alcohol_status", "smoking", "periodontitis",  "cholesterol")
+runsiamcat(feat.st.rel.cancer.3mg, meta.temp, "ece.pc.st.cancer.3mg.", "PC","lasso_ll", "log.clr", "0")
+meta.temp <- as.data.frame(subset(meta.st.cancer, select= metatest))
+
+load(paste0(PARAM$folder.Rdata, "2020-05-03.pc.st.cancer.3mg.lasso_ll.log.clr.prev0.siamcat.Rdata"))
+siamcat.pc <- siamcat
+
+load(paste0(PARAM$folder.Rdata, "/pos.pc.st.cancer.3mg.lasso_ll.log.clr.prev0.50gFC.Rdata"))
+siamcat.pos <- siamcat
+
+# add confounders to model
+add.meta <- function(x, n){
+  x <- add.meta.pred(x, pred.names = n, verbose=3)
+  x <- train.model(x, method='ridge', verbose=2, perform.fs = FALSE,
+                   param.fs = list( 
+                                   direction='positive'))
+  x <- make.predictions(x)
+  x <- evaluate.predictions(x)
+  return(x)
+}
+
+siamcat.jau <- add.meta(siamcat.pc, 'jaundice')
+siamcat.col <- add.meta(siamcat.pc, 'cholesterol')
+siamcat.dia <- add.meta(siamcat.pc, 'diabetes')
+siamcat.bil <- add.meta(siamcat.pc, 'bilirubin_direct')
+siamcat.met <- add.meta(siamcat.pc, 'metformin')
+siamcat.smo <- add.meta(siamcat.pc, 'smoking')
+siamcat.alc <- add.meta(siamcat.pc, 'alcohol_status')
+siamcat.c19_coded <- add.meta(siamcat.pc, 'coded_ca19')
+siamcat.c19 <- add.meta(siamcat, 'CA19')
+
+# combine positive model 
+siamcat.jau.pos <- add.meta(siamcat.pos, 'jaundice')
+siamcat.col.pos <- add.meta(siamcat.pos, 'cholesterol')
+siamcat.dia.pos <- add.meta(siamcat.pos, 'diabetes')
+siamcat.bil.pos <- add.meta(siamcat.pos, 'bilirubin_direct')
+siamcat.met.pos <- add.meta(siamcat.pos, 'metformin')
+siamcat.smo.pos <- add.meta(siamcat.pos, 'smoking')
+siamcat.alc.pos <- add.meta(siamcat.pos, 'alcohol_status')
+siamcat.c19.pos_coded <- add.meta(siamcat.pos, 'coded_ca19')
+siamcat.c19.pos <- add.meta(siamcat.pos, 'CA19')
+# none of the confounders is ever selected in the model
+model.evaluation.plot('MetaG pos'= siamcat.pos,
+                      'MetaG'= siamcat.pc,
+                      'jaundice'= siamcat.jau,
+                      'billirubin'= siamcat.bil,
+                      "diabetes"= siamcat.dia,
+                      'cholesterol'= siamcat.col,
+                      'CA19 direct'= siamcat.c19,
+                      #'metformin'= siamcat.met,
+                      'CA19 coded'= siamcat.c19_coded,
+                      'smoking'= siamcat.smo,
+                      'alcohol'= siamcat.alc,
+                      fn.plot = paste0(PARAM$folder.results,  Sys.Date(),
+                                       'all.confounders.interpret.pdf'))
+
+# save confounder Rdata
+save(siamcat.pc, siamcat.bil, siamcat.col, siamcat.dia, siamcat.jau, siamcat.alc, 
+     siamcat.met, siamcat.c19, siamcat.smo, siamcat.c19_coded, siamcat.c19, 
+     siamcat.c19.pos_coded, siamcat.c19.pos, siamcat.dia.pos, siamcat.jau.pos, siamcat.pos,
+     file = paste0(PARAM$folder.files, Sys.Date(), 'siamcat.confounder.stageinc.RData'))
+
+
+#AUC
+get.roc <- function(sc, name){
+  pred <- rowMeans(pred_matrix(sc))
+  label <- sc@label$label
+  roc.obj <- roc(predictor=pred, response=label)
+  df.return <- tibble(sensitivity=roc.obj$sensitivities,
+                      specificitiy=roc.obj$specificities,
+                      name=name,
+                      auroc=roc.obj$auc)
+}
+# plot original models for DE-1
+df.plot <- bind_rows(get.roc(siamcat.pc, 'metaG model 1 AUC:'),
+                     get.roc(siamcat.pos, 'metaG  model 2 AUC:'),
+                     get.roc(siamcat.c19, 'metaG model 1 + CA19-9 raw AUC:'),
+                     get.roc(siamcat.c19_coded, 'metaG model 1 + CA19-9 coded AUC:'),
+                     get.roc(siamcat.c19.pos, 'metaG model 2 + CA19-9 raw AUC:'),
+                     get.roc(siamcat.c19.pos_coded, 'metaG model 2 + CA19-9 coded AUC:'))
+
+model.evaluation.plot('metaG model 1'= siamcat.pc,
+                      'metaG  model 2'= siamcat.pos,
+                      'metaG model 1 + CA19-9 coded'= siamcat.c19_coded,
+                      "metaG model 2 + CA19-9 coded"= siamcat.c19.pos_coded,
+                      fn.plot = paste0(PARAM$folder.results,  Sys.Date(),
+                                       'ca19.confounders.interpret.pdf'))
+
+p <- df.plot %>% 
+  arrange(sensitivity) %>% 
+  mutate(label=paste0(name, ' ', sprintf(fmt='%.2f', auroc))) %>% 
+  ggplot(aes(x=specificitiy, y=sensitivity, col=label)) + 
+    geom_abline(intercept = 1, slope = 1, col='black', lty=3) +
+    geom_line() + 
+    #scale_color_tableau(name='') + 
+    xlab('Specificity') + 
+    ylab('Sensitivity') + 
+    theme_bw() + 
+    scale_x_reverse() +
+    theme(panel.grid.minor = element_blank(),
+          aspect.ratio = 1,
+          legend.position = c(0.65, 0.2), legend.title = element_blank())
+# save the plots
+ggsave(p,  filename = paste0(PARAM$folder.results, 'roc.spanish.ca19.pdf'),
+       width = 5.5, height = 4.5)
+
+################################################################################
+meta.st.cancer$status.n <- as.numeric(meta.st.cancer$status)
+meta.st.cancer <- meta.st.cancer %>%  
+  mutate(status.n=dplyr::recode(status.n,"4"=1,
+                                     "2"=0))
+
+temp= meta.st.cancer[complete.cases(meta.st.cancer[ , 35:36]),]
+temp$CA19 <- as.numeric(as.character(temp$CA19))
+#plot ca19 raw  
+fn.plot <- paste(PARAM$folder.results, 
+                 paste(Sys.Date(),'Spanish.PC.CA19.9.coded.pdf', sep='_'),sep='')
+pdf(fn.plot, paper='special', width=9, height=9)
+    roc_obj <- roc(predictor = temp$coded_ca19, 
+                   response = temp$status.n, ci=TRUE)
+    plot.roc(roc_obj, print.auc = TRUE, ci = TRUE, cex.axis=0.8, 
+             col = rgb(153, 201, 61, max=255))
+    title(main=paste('CA19-9 binary'), cex.main=0.8)
+dev.off()
+
+#plot ca19 only 
+fn.plot <- paste(PARAM$folder.results, 
+                 paste(Sys.Date(),'Spanish.PC.CA19.9.pdf', sep='_'),sep='')
+pdf(fn.plot, paper='special', width=9, height=9)
+    roc_obj <- roc(predictor = temp$coded_ca19, 
+                   response = temp$status.n, ci=TRUE)
+    plot.roc(roc_obj, print.auc = TRUE, ci = TRUE, cex.axis=0.8, 
+             col = rgb(153, 201, 61, max=255))
+    title(main=paste('CA19-9'), cex.main=0.8)
+dev.off()
+
+feat.temp=feat.st.rel.cancer.3mg[,rownames(temp)]
+# run siamcat for only CA19 samples
+runsiamcat(feat.temp, temp, "only.ca19.samples.", "PC","lasso_ll", "log.clr", "0")
+
+
+add.meta <- function(x, n){
+  x <- add.meta.pred(x, pred.names = n, verbose=3)
+  x <- train.model(x, method='ridge', verbose=2, perform.fs = TRUE)
+  x <- make.predictions(x)
+  x <- evaluate.predictions(x)
+  return(x)
+}
+
+siamcat.onlyca19 <- add.meta(siamcat, 'coded_ca19')
+```
+
+```{r}
+# model only based on Veillonella 
+idx= c("Veillonella atypica [r_01941]",
+       "Veillonella species  [m_13135]",
+       "Veillonella dispar [r_01940]", 
+       "Veillonella parvula [r_01938]", 
+       "Alloscardovia omnicolens [r_02114]",
+       "Butyrivibrio crossotus [r_03686]", 
+      "Firmicutes sp. [r_03629]", # Erysipelatoclostridium sp003024675
+       "Streptococcus anginosus/intermedius [r_00567]", 
+       "Methanobrevibacter smithii [r_03695]", 
+       "Bacteroides finegoldii [r_03474]")
+feat.st.rel.cancer.3mg.red <- feat.st.rel.cancer.3mg[(rownames(feat.st.rel.cancer.3mg) %in% idx), ]
+df.plot=melt(feat.st.rel.cancer.3mg.red)
+# plot the abundance difference btw PC CTR and pancreatitis
+df.plot$status <- meta.st$status[match(df.plot$Var2,rownames(meta.st))]
+df.plot$cohort <- "Spanish"
+df.plot=df.plot%>%
+  filter(value!=0)
+p.spanish <- ggplot(df.plot, aes(x=Var1, y=value, fill=status, colour=status)) +
+  geom_boxplot(alpha=0.5, outlier.colour = NA) +
+  geom_point(position = position_jitterdodge(), size=1) +
+  scale_color_manual(values=c("#0571b0","#f4a582","#ca0020")) +
+  scale_fill_manual(values=c("#0571b0","#f4a582","#ca0020")) +
+  scale_y_sqrt() +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank()
+  )
+print(p.spanish)
+
+ggsave(plot=p.spanish, filename = paste0(PARAM$folder.results, "abundance for 10 selected species.pdf"))
+# 3mg
+runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer,  "2021-9-9-N10reduced.pc.st.cancer.3mg.", "PC","ridge", "log.clr", "0")
+siamcatN10<-runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer,  "2021-06-24-N10reduced.pc.st.cancer.3mg.", "PC","ridge", "log.std", "0")
+runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer, "2021-06-24-N10.reduced.pc.st.cancer.3mg.", "PC","lasso_ll", "log.std", "0")
+
+# feat.st.rel.cancer.2mg.red <- feat.st.rel.cancer.2mg[(rownames(feat.st.rel.cancer.2mg) %in% idx), ]
+# 
+# runsiamcat(feat.st.rel.cancer.2mg.red, meta.st.cancer, "reduced.pc.st.cancer.2mg.", "PC","ridge", "log.std", "0")
+# 
+# runsiamcat(feat.st.rel.cancer.2mg.red, meta.st.cancer, "reduced.pc.st.cancer.2mg.", "PC","lasso_ll", "log.std", "0")
+
+```
+
+```{r}
+# model claim 2 in patent
+
+idx= c("Veillonella atypica [r_01941]",
+       "Veillonella species  [m_13135]",
+       "Veillonella dispar [r_01940]", 
+       "Veillonella parvula [r_01938]", 
+       "Alloscardovia omnicolens [r_02114]",
+       "Butyrivibrio crossotus [r_03686]", 
+       "Streptococcus anginosus/intermedius [r_00567]", 
+       "Methanobrevibacter smithii [r_03695]", 
+       "Bacteroides finegoldii [r_03474]",
+       "Firmicutes sp. [r_03629]", # Erysipelatoclostridium sp003024675
+
+      "bacterium LF-3 [r_03628]", #Erysipelatoclostridium sp000752095 (also: Guyana massiliensis)
+      "Streptococcus oralis [r_00288]",
+      "Streptococcus gordonii/cristatus [r_03970]",
+      "Romboutsia timonensis [r_09389]",
+      "Ruminococcus callidus [r_11153]",
+      "Atopobium parvulum [r_02949]",
+      "Fusobacterium periodonticum [r_00999]",
+      "Fusobacterium hwasookii/nucleatum [r_01004]",
+      "Firmicutes sp. [r_03641]", # Phascolarctobacterium faecium
+      "Dialister pneumosintes [r_03630]", 
+      "Prevotella sp. CAG:279 [m_12279]",
+      "Duodenibacillus massiliensis [r_03665]")
+
+feat.st.rel.cancer.3mg.red <- feat.st.rel.cancer.3mg[(rownames(feat.st.rel.cancer.3mg) %in% idx), ]
+df.plot=melt(feat.st.rel.cancer.3mg.red)
+# plot the abundance difference btw PC CTR and pancreatitis
+df.plot$status <- meta.st$status[match(df.plot$Var2,rownames(meta.st))]
+df.plot$cohort <- "Spanish"
+df.plot=df.plot%>%
+  filter(value!=0)
+p.spanish <- ggplot(df.plot, aes(x=Var1, y=value, fill=status, colour=status)) +
+  geom_boxplot(alpha=0.5, outlier.colour = NA) +
+  geom_point(position = position_jitterdodge(), size=1) +
+  scale_color_manual(values=c("#0571b0","#f4a582","#ca0020")) +
+  scale_fill_manual(values=c("#0571b0","#f4a582","#ca0020")) +
+  scale_y_sqrt() +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank()
+  )
+print(p.spanish)
+
+ggsave(plot=p.spanish, filename = paste0(PARAM$folder.results, "abundance for 22 selected species.pdf"))
+# 3mg
+
+siamcatN10<-runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer,  "2021-09-08-N10reduced.pc.st.cancer.3mg.", "PC","ridge", "log.std", "0")
+
+siamcatN22<-runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer,  "2021-09-08-N22reduced.pc.st.cancer.3mg.", "PC","ridge", "log.std", "0")
+
+#siamcatN22<-runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer,  "2021-09-8-N22reduced.pc.st.cancer.3mg.", "PC","enet", "log.std", "0")
+
+#siamcatN22<-runsiamcat(feat.st.rel.cancer.3mg.red, meta.st.cancer,  "2021-09-8-N22reduced.pc.st.cancer.3mg.", "PC","enet", "log.clr", "0")
+```
+
+
+
+```{r}
+# include ca19-9 to model
+# add confounders to model
+add.meta <- function(x, n){
+  x <- add.meta.pred(x, pred.names = n, verbose=3)
+  x <- train.model(x, method='ridge', verbose=2, perform.fs = FALSE,
+                   param.fs = list( 
+                                   direction='positive'))
+  x <- make.predictions(x)
+  x <- evaluate.predictions(x)
+  return(x)
+}
+# add ca19-9 data 
+siamcat.ca19.N22 <- add.meta(siamcatN22, 'coded_ca19')
+siamcat.ca19.N10 <- add.meta(siamcatN10, 'coded_ca19')
+
+#AUC
+get.roc <- function(sc, name){
+  pred <- rowMeans(pred_matrix(sc))
+  label <- sc@label$label
+  roc.obj <- roc(predictor=pred, response=label)
+  df.return <- tibble(sensitivity=roc.obj$sensitivities,
+                      specificitiy=roc.obj$specificities,
+                      name=name,
+                      auroc=roc.obj$auc)
+}
+
+model.evaluation.plot('10 bacterial model'= siamcatN10,
+                      '10 bacterial model + CA19-9 coded'= siamcat.ca19.N10,
+                      '22 bacterial model'= siamcatN22,
+                      '22 bacterial model + CA19-9 coded'= siamcat.ca19.N22,
+                      fn.plot = paste0(PARAM$folder.results,  Sys.Date(),
+                                       'patent.roc.pdf'))
+
+```
+
+```{r}
+# roc plot for german and spanish ca19-9
+df =meta.de[!is.na(meta.de$Ca_19_9),]
+# remove the comma in ca19-9 calues
+df$Ca_19_9= as.integer(df$Ca_19_9)
+#recode
+df<- df %>%
+  mutate(subject_disease_status=ifelse(subject_disease_status=="CTR", 0, 1))
+
+fn.plot <- paste(plot.dir, paste(Sys.Date(),'German-ca19-9-roc.pdf', sep='_'),sep='')
+pdf(fn.plot, paper='special', width=9, height=9)
+par(mfrow = c(2,2))
+par(mar=c(4,4,1,1))
+    roc_obj <- roc(predictor = df$Ca_19_9, response = df$subject_disease_status, ci=TRUE)
+    plot.roc(roc_obj, print.auc = TRUE, ci = TRUE, cex.axis=0.8, col = rgb(153, 201, 61, max=255))
+    title(main=paste('CA19-9'), cex.main=0.8)
+dev.off()
+
+
+# for german
+
+```
+
+
+```{r}
+# combine fecal and oral data
+meta.total.st.or <- rbind(meta.st.cancer, meta.or.cancer)
+feat.total.st.or <- motu.rel.3mg[,colnames(motu.rel.3mg) %in% rownames(meta.total.st.or)]
+#runsiamcat
+runsiamcat(feat.total.st.or, meta.total.st.or, "spanish_fecal_oral_combined", "PC", "lasso_ll", "log.clr", "0")
+
+```
+
+```{r session_info}
+sessionInfo()
+```
+
+
