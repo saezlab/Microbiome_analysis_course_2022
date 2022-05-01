@@ -134,8 +134,7 @@ p.wilcox <- ggplot(p.cal, aes(x = fc, y = log10.adj)) +
   
   print(p.wilcox)
   # save plot
-  ggsave(p.wilcox, 
-         filename=paste0(folder.results, "wilcox.volcano.plot.pdf"))
+  ggsave(p.wilcox, filename=paste0(folder.results, "wilcox.volcano.plot.pdf"))
 ```
 
 
