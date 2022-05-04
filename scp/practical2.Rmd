@@ -1,13 +1,23 @@
 ---
 title: " Microbial Data Analysis Course Part 2"
-output: html_document 
-date: "15-03-2022"
+author: "Ece Kartal and Daniel Dimitrov"
+output:
+  html_document: 
+    toc: yes
+  html_notebook:
+    toc: yes
+    number_sections: no
+    toc_float: yes
+    theme: spacelab
+    code_folding: none
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
-This is the schedule for the practical session:
+This is the schedule for the practical session part 2:
 
 - Differential abundance analysis: 40 minutes
-- Break: 10 minutes
 - Break: 10 minutes
 - Machine learning modelling with SIAMCAT: 50 minutes
 - Conclusions: 10 minutes
@@ -16,45 +26,63 @@ This is the schedule for the practical session:
 
 We first load the packages that we will employ during the tutorial
 
-```{r, message=FALSE}
+```{r library, eval=TRUE}
+suppressPackageStartupMessages({
 library(knitr)
 library(tidyverse)
 library(ggrepel)
 library(ggplot2)
 library(pROC)
 library(SIAMCAT)
+})
 
-set.seed(540832)
+set.seed(1881)
 ```
 
 Next, we read the data tables that contain the count matrix and samples' metadata. 
-```{r, message=FALSE}
+```{r loadData, message=FALSE}
 # set the working directory
-setwd("~/Documents/SAEZ/teaching/Microbiome_analysis_course_2022/")
-load("data/mobi.Rdata")
-folder.results= paste0(getwd(), "/results/")
+folder <- gsub("/scp", "", getwd())
+folder.results <- paste0(folder, "/results/")
+file.path(folder, 'data/mobi.Rdata')
+
+# load data
+load(file=file.path(folder, 'data/mobi.Rdata'))
 ```
 
 ################################################################################
-# Differential Abundance Analysis
+## Differential Abundance Analysis
 ################################################################################
+
+Since we are running multiple similar tests, we need to apply a false discovery rate (fdr) correctios and correcting across all features will most likely result in no significant results after fdr correction. Also, you don’t want to look at over 14.000 P-values, do you?
+
+There are a number of way to decrease the number of features:
+
+- Apply an abundance cutoff (such as only looking at taxa that are at least 1% abundance in at least one sample)
+- Apply a frequency cutoff (such as only looking at taxa that occur in at least 2% of samples)
+
+```{r filtering}
+# filter low abundant taxa
+motu.abs.fil <- motu.abs[rowSums(motu.abs >= 10^-5) >= 2, ]
+
+dim(motu.abs.fil)
+# print a message to show the number of species that are retrieved after filtering
+message(
+  "Initial count matrix contained ",
+  nrow(motu.abs),
+  " species and the resulting count matrix contains ",
+  nrow(motu.abs.fil),
+  " species.")
+```
 
 ## Normalization
 
-There are multiple factors that can result in libraries of different sizes. 
-Those include experimental variations, batch effects or simply, different sequencing depths. 
-We assume that, if it were not for these variations, all samples should have a similar 
-range and distribution of abundance. Therefore, after data filtering, a normalization step 
-is necessary to ensure that species abundance can be compared between samples and experimental 
-conditions. Below, we use the relative abundance. There are other normalisation approaches described 
-in [Pereira et al. 2018](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4637-6).
+There are multiple factors that can result in libraries of different sizes. Those include experimental variations, batch effects or simply, different sequencing depths. We assume that, if it were not for these variations, all samples should have a similar range and distribution of abundance. Therefore, after data filtering, a normalization step is necessary to ensure that species abundance can be compared between samples and experimental conditions. Below, we use the relative abundance. 
 
-```{r}
-# filter low abundant taxa
-motu.abs.fil <- motu.abs[rowSums(motu.abs >= 10^-5) >= 2, ]
-dim(motu.abs.fil)
+There are other normalisation approaches described in [Pereira et al. 2018](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4637-6) & more recently [Rico et al., 2021](https://www.nature.com/articles/s41467-021-23821-6).
 
-# apply normalization function
+```{r normalization}
+# apply relative abundance normalization 
 motu.rel <- prop.table(as.matrix(motu.abs), 2)
 motu.fil.rel <- prop.table(as.matrix(motu.abs.fil), 2)
 ```
@@ -62,14 +90,14 @@ motu.fil.rel <- prop.table(as.matrix(motu.abs.fil), 2)
 And have a look to how the normalized values look like:
 
 ```{r}
-head(motu.fil.rel)
+motu.fil.rel[1:10,1:10]
 ```
 
 ## Differential Abundance Analysis with Wilcoxin Test
 
 Next, we can analyze the differences between the microbiome profiles of both groups. To do so, we use `wilcoxin test` which is a statistical test where all species in the count matrix are compared between the sample groups of interest.  `wilcoxin test` is not the only option to perform Differential Abundance Analysis. Common alternatives include [`edgeR`](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2796818/) and [`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8).
 
-```{r}
+```{r differentialAbundance}
 featTable = motu.fil.rel
 metaTable = meta
 metaTable$ID = rownames(metaTable)
@@ -101,7 +129,10 @@ p.cal <- p.cal %>%
   mutate(adj.pval = p.adjust(pval, method = "BH")) %>%
   mutate(sig = ifelse(adj.pval < p_cutoff, "p.adj < 0.05", "not sig")) %>%
   mutate(log10.adj = -log10(adj.pval))
-  
+
+# Lets have a look to results
+p.cal
+
 # save file
 write.table(p.cal, file=paste0(folder.results, 'wilcox.results.tsv'), 
             sep='\t', row.names=TRUE, col.names=TRUE)
@@ -109,15 +140,16 @@ write.table(p.cal, file=paste0(folder.results, 'wilcox.results.tsv'),
 
 And look at the distribution of the adjusted P values:
 
-```{r}
+```{r histogram}
 ggplot2::ggplot(p.cal, aes(x = pval)) +
   ggplot2::geom_histogram()
 ```
 
 **NOTE:** Do you remember how the P-value distribution should look like? If not, please see [here](http://varianceexplained.org/statistics/interpreting-pvalue-histogram/).
 
-We can also visualize the abundance changes  using one of the most common plots to explore DAA results, the **volcano plot**:
-```{r}
+We can also visualize the abundance changes  using one of the most common plots to explore  Differential Abundance Analysis results, the **volcano plot**:
+
+```{r volcanoPlot}
 # Volcano plot 
 p.wilcox <- ggplot(p.cal, aes(x = fc, y = log10.adj)) +
   geom_point(aes(color = sig), alpha=0.7) +
@@ -132,68 +164,108 @@ p.wilcox <- ggplot(p.cal, aes(x = fc, y = log10.adj)) +
   ylab("Log10 adjusted p-value") +
   theme_classic()
   
-  print(p.wilcox)
-  # save plot
-  ggsave(p.wilcox, filename=paste0(folder.results, "wilcox.volcano.plot.pdf"))
+p.wilcox
+# save the plot
+ggsave(p.wilcox, filename=paste0(folder.results, "wilcox.volcano.plot.pdf"))
 ```
-
 
 A volcano plot enables us to quickly visualize the magnitude (logFC) and significance (-log10(pvalue)) of DAA changes. Each point represent a species, and its color indicates whether they surpass or not a cutoff of  an adjusted P value < `0.05`. 
 
-**QUESTION**: What do the horizontal dashed line mean in this plot? Take a look at the code and think about their meaning. 
+**QUESTION**: What does the horizontal line mean in this plot? Take a look at the code and think about their meaning. 
 
 **QUESTION**: Try to modify the and `p_cutoff` variables in this chunk. What happens?
 
 ################################################################################
-# Modelling by SIAMCAT
+## Modelling by SIAMCAT
 ################################################################################
 
-*SIAMCAT*  (Statistical Inference of Associations between Microbial Communities And host phenoTypes)[paper here](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02306-1) is a comprehensive toolbox for comparative metagenome analysis using ML, statistical modeling, and advanced visualization approaches.
+`SIAMCAT` (Statistical Inference of Associations between Microbial Communities And host phenoTypes) is a comprehensive toolbox for comparative metagenome analysis using ML, statistical modeling, and advanced visualization approaches [paper here](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02306-1).
 
-SIAMCAT needs 
-- a feature matrix (matrix or data.frame) 
-- features (in rows) samples (in columns)
+`SIAMCAT` needs:
+
+- a feature matrix (matrix or data.frame) that has features (in rows) samples (in columns)
 - metadata in a data.frame, samples as row names
+
 For microbiome studies, many issues arise from key characteristics of metagenomic data such as 
+
 - large technical and inter-individual variation
 - experimental bias, 
 - compositionality of relative abundances, 
 - zero inflation, 
 - non-Gaussian distribution, all of which necessitate data normalization in order for ML algorithms to work well.
-```{r}
+
+Please note that `SIAMCAT` is supposed to work with *relative abundances*. 
+
+```{r SiamcatObject, results='hold'}
 # define files and parameters
 meta.train <- meta
 feat.train <- motu.fil.rel
-test.meta <- c("Age", "BMI", "center", "smoking", "obesity")
+test.meta <- c("age",  "center", "smoking", "periodontitis", "gender", "alcohol_status")
 
 # start modelling
 siamcat <- siamcat(feat=feat.train, meta=meta.train, label = 'status', case='PC')
+
+# SIAMCAT builds on the phyloseq data structure
+show(siamcat)
+```
+
+Since we have quite a lot of microbial species in the dataset at the moment, we can perform *unsupervised feature selection* using the function `filter.features`
+
+```{r SiamcatTests, results='hold'}
 # filter based on abundance
 siamcat <- filter.features(siamcat, filter.method = 'abundance', 
                              cutoff=0.001, verbose=3)
-# check confounder effect
+
+
+# The check.confounders function provides the option to test the associated metadata 
+# variables for potential confounding influence.
 check.confounders(siamcat, fn.plot = paste0(folder.results, 'confounders.pdf'),
                   meta.in = test.meta, verbose = 3)
+
 # normalise count matrix
 siamcat <- normalize.features(siamcat, norm.method = "log.clr",
                               norm.param = list(log.n0 = 1e-05, sd.min.q = 1),
                               verbose=3)
-# compute associations 
+
+# Associations between microbial species and the label can be tested with the 
+# *check.associations* function
 siamcat <- check.associations(siamcat, 
                               feature.type = 'normalized', 
                               detect.lim = 10e-5, 
                               plot.type = "quantile.box",
                               fn.plot = paste0(folder.results, 'assoc.plot.pdf'))
+```
+
+`SIAMCAT` contains functions for data normalization, splitting the data into cross-validation folds, training the model, and making predictions based on cross-validation instances and the trained models.Here, we choose a 10 times-repeated 10-fold cross-validation scheme.
+
+The models are saved in the **model_list** slot of the *SIAMCAT* object. The model building is performed using the `mlr` R package. All models can easily be accessed.
+
+```{r SiamcatModelling, results='hold'}
 # split data for nested cross validation  
 siamcat <- create.data.split(siamcat, num.folds = 10, num.resample = 10)
 # run model
 siamcat <- train.model(siamcat, method = "lasso_ll")
-# make predictions 
+```
+
+We want to find out how well the model performed and which microbial species had been selected in the model. In order to do so, we first calculate how well the predictions fit the real data using the function `evaluate.predictions`. This function calculates the Area Under the Receiver Operating Characteristic (ROC) Curve (**AU-ROC**) and the Precision Recall (PR) Curve for each resampled cross-validation run.
+
+```{r model Eval, results='hold'}
 siamcat <- make.predictions(siamcat)
 # evaluate model
 siamcat <- evaluate.predictions(siamcat)
 # evaluation plot based on AUROC
+model.evaluation.plot(siamcat)
+# to save it
 model.evaluation.plot(siamcat, fn.plot = paste0(folder.results, 'evaluation.plot.pdf'))
+```
+
+The final plot produced by `SIAMCAT` is the model interpretation plot, created by the `model.interpretation.plot` function. The plot shows for the top selected features the
+
+- model weights (and how robust they are) as a barplot,
+- a heatmap with the z-scores or fold changes for the top selected features, and
+- a boxplot showing the proportions of weight per model which is captured by the top selected features.
+
+```{r interpretPlot, results='hold'}
 # interpretation plot with heatmap
 model.interpretation.plot(siamcat, 
                           consens.thres = 0.5,
@@ -204,8 +276,13 @@ model.interpretation.plot(siamcat,
 # save modelling matrix
 save(siamcat, file=paste0(folder.results, 'siamcat.lassoll.model.RData'))
 ```
-## Adding 
-```{r}
+
+## Adding metadata variables to microbial model
+
+`add.meta.pred` functions adds one or several metadata variables to the set of features, so that they can be
+included for model training. Numerical meta-variables are added as z-scores to the feature matrix unless specified otherwise.
+
+```{r AddingMetadata}
 # add metadata to the feature matrix to be later used as predictors
 add.meta <- function(x, n){
   x <- add.meta.pred(x, pred.names = n, verbose=3)
@@ -216,12 +293,26 @@ add.meta <- function(x, n){
   x <- evaluate.predictions(x)
   return(x)
 }
-# combine with naive model
+# combine smoking information with naive microbiome model
 siamcat.smoking<- add.meta(siamcat, 'smoking')
 
+# lets see the comparison of only microbiome-based model and microbiome+smoking
+model.evaluation.plot('Only MetaG'= siamcat,
+                      'MetaG and smoking'= siamcat.smoking)
+
+# to save it
 model.evaluation.plot('Only MetaG'= siamcat,
                       'MetaG and smoking'= siamcat.smoking,
                       fn.plot = paste0(folder.results, 'metag.smoking.combined.pdf'))
-
 ```
 
+## Session info
+
+It is good practice to print the so-called session info at the end of an
+R script, which prints all loaded libraries, their versions etc. This
+can be helpful for reproducibility and recapitulating which package
+versions have been used to produce the results obtained above.
+
+```{r sessionInfo}
+sessionInfo()
+```
