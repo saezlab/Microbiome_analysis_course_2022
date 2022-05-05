@@ -1,37 +1,123 @@
 ---
 title: " Microbial Data Analysis Course Part 1"
-output: html_document 
-date: "15-03-2022"
+author: "Ece Kartal and Daniel Dimitrov"
+output:
+  html_document: 
+    toc: yes
+  html_notebook:
+    toc: yes
+    number_sections: no
+    toc_float: yes
+    theme: spacelab
+    code_folding: none
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
-This is the schedule for the practical session:
+This vignette contains the course schedule and material of the **Microbiome Data Analysis & Visualization Course**. 
+The estimated time to go over the content of the tutorial is of ~2 hours for theoretical part & 4 hours for practical session. 
+
+We will discuss the role of the microbiome in human body and the consequences of its dysfunction on the body
+- What is the microbiome,
+- How to study microbiome and their limitations 
+- Evolution of microbiome over human lifespan
+- The human microbiome in health and disease 
+- Applications based on microbiome
+
+
+*This is the schedule for the practical session*:
 
 - Introduction, setup and troubleshooting: 15 minutes
-- Shotgun metagenomics data quality control and normalization: 10 minutes
-- Rarefaction: 10 minutes
-- Alpha diversity calculation (within sample diversity) & visualization: 35 minutes
-- Break: 10 minutes
+- Shotgun metagenomics data quality control and normalization: 20 minutes
+- Alpha diversity calculation (within sample diversity) & visualization: 40 minutes
+- Break: Lunch Break
 - Beta diversity calculation (between sample diversity) & visualization: 40 minutes
+- Break: 10 minutes
+
+Please contact me at [ece.kartal@uni-heidelberg.de](mailto:ece.kartal@uni-heidelberg.de). 
+Feedback about the tutorial is also highly appreciated.
+
+## Before you start
+
+This tutorial is intended to guide users through the statistical analysis of shotgun metagenomics data. 
+We assume the following skills in the audience:
+
+- Basic knowledge of the [statistical programming language R](https://www.r-project.org/about.html).
+- Basic knowledge about how to load and make use of external R packages, such as those included in the [tidyverse](https://www.tidyverse.org/) and [Bioconductor packages](http://bioconductor.org/).
+- Be familiar with concepts like omics data, biological databases, exploratory data analysis and hypothesis testing.
+
+This tutorial requires:
+
+- R >= 4.1.2 You can download an install R from [this link](https://cran.r-project.org/).
+- The following R packages are also required:
+  - `tidyverse`
+  - `knitr`
+  - `ggrepel`
+  - `pROC`
+  - `vegan`
+  - `reshape2`
+  - `ggplot2`
+  - `ggpubr`
+  - `car`
+  - `dplyr`
+  - `plyr`
+  - `SIAMCAT`
+  
+  - Rstudio is highly recommended to open, run and modify the R code that we will use in this tutorial. You can download and install Rstudio from [this link](https://www.rstudio.com/products/rstudio/download/). Please install RStudio Desktop, Open Source Edition, which is free thanks to its Open Source License.  
+
+################################################################################
+## Install and load required R libraries
+################################################################################
 
 - Please clone the content of the following repository in your computer **the day before course**: https://github.com/saezlab/Microbiome_analysis_course_2022.git
 - The following code chunk takes care of checking and installing those packages in your R installation. Please run it from your computer: 
 
-```{r, message=FALSE}
-# CRAN packages
-cran_packages <- c("tidyverse", "BiocManager", "knitr", "ggrepel", "pROC", "vegan",
-                   "reshape2", "ggplot2", "ggpubr", "car",  "dplyr", "plyr")
-for (i in cran_packages) {
-  if (!require(i, character.only = TRUE))
-    install.packages(i)
-}
+Before we start with any analysis, it is good practice to load all
+required libraries. This will also immediately identify libraries that
+may be missing. Note that for this course, we pre-installed all
+libraries for you. When you run your own analysis, you have to check
+which libraries are already available, and which are not. We use
+`suppressPackageStartupMessages` here to suppress the output messages of
+the various packages for reasons of brevity.
 
-# BioC packages
-bioc_packages <-
-  c("SIAMCAT")
-for (i in bioc_packages) {
-  if (!require(i, character.only = TRUE))
-    BiocManager::install(i, update = FALSE)
-} 
+When using functions that sample pseudorandom numbers, each time you
+execute them you will obtain a different result. For the purpose of this
+vignette, this is not what we want. We therefore set a particular seed
+value(here: 1880) so that the result will always be the same. For more
+information, check out [this webpage](https://r-coder.com/set-seed-r)
+that explains this general concept in more detail.
+
+```{r, message=FALSE, eval=FALSE}
+# CRAN packages
+# cran_packages <- c("tidyverse", "BiocManager", "knitr", "ggrepel", "pROC", "vegan",
+#                    "reshape2", "ggplot2", "ggpubr", "car",  "dplyr", "plyr")
+# for (i in cran_packages) {
+#   if (!require(i, character.only = TRUE))
+#     install.packages(i)
+# }
+# 
+# # BioC packages
+# bioc_packages <-
+#   c("SIAMCAT")
+# for (i in bioc_packages) {
+#   if (!require(i, character.only = TRUE))
+#     BiocManager::install(i, update = FALSE)
+# } 
+```
+
+```{r, message=FALSE}
+suppressPackageStartupMessages({
+  library(knitr)
+  library(tidyverse)
+  library(ggplot2)
+  library(ggpubr)
+  library(car)
+  library(vegan)
+  library(Rarefy)
+})
+
+set.seed(1880)
 ```
 
 ## The biology of the tutorial
@@ -42,52 +128,43 @@ In this tutorial we will work with a subset of the shotgun metagenomics data ava
 
 Shotgun metagenomics sequencing captures the microbial communities contained in a sample. It allows us to understand the extraordinary diversity present within microbial communities which is limited via standard culturing approaches. 
 
-## Loading packages and data in R
-
-We first load the packages that we will employ during the tutorial
-
-```{r, message=FALSE}
-library(knitr)
-library(tidyverse)
-library(reshape2)
-# library(dplyr)
-# library(plyr)
-library(ggplot2)
-library(ggpubr)
-library(car)
-library(vegan)
-
-set.seed(183748)
-```
+## Load shotgun metagenomics data into R and setup output directories
 
 Next, we read the data tables that contain the count matrix and samples' metadata. 
+**count matrix** This is a matrix that contains samples as columns and feature names (species in our case) as rows.
+
 ```{r, message=FALSE}
 # set the working directory
-setwd("~/Documents/SAEZ/teaching/Microbiome_analysis_course_2022/")
-load("data/mobi.Rdata")
-folder.results= paste0(getwd(), "/results/")
+folder <- gsub("/scp", "", getwd())
+folder.results <- paste0(folder, "/results/")
+file.path(folder, 'data/mobi.Rdata')
+
+# load data
+load(file=file.path(folder, 'data/mobi.Rdata'))
 ```
 
-Next, we can explore how the first rows of the count matrix look like. In this matrix, rows correspond to species and columns represent samples.
+Next, we can explore how the count matrix look like.
 
 ```{r}
-head(motu.abs)
+motu.abs[1:10, 1:5]
 ```
 
 We can also explore the content of the metadata table, which contain the properties/annotations for each sample. 
-```{r}
-meta
+
+```{r metaCheck}
+meta[1:10, 1:10]
+meta$ID <- rownames(meta)
 ```
 
 ################################################################################
-# Quality control and pre-processing
+## Quality control and pre-processing
 ################################################################################
 
 ## Checking library size
 
 Before being able to compare data from both cancer and controls, we should perform basic quality control analyses and some pre-processing of the count matrix. In a first step, we can take a look to the total number of sequences per sample, which is also known as library size. This provides information about the sequencing depth and is a good indicator of differences or batch effects in the sequencing process.
 
-```{r}
+```{r histogram}
 data.frame(sample = rownames(meta), n_counts = meta$library_size) %>%
   ggplot2::ggplot(aes(x = sample, y = n_counts)) +
   ggplot2::geom_col() +
@@ -98,16 +175,24 @@ data.frame(sample = rownames(meta), n_counts = meta$library_size) %>%
 
 **NOTE**: The `ggplot2` package, which is part of the `tidyverse` collection, is here employed to create the plot. `ggplot2` comprises a powerful yet simple framework to create and edit high-quality graphics. For more information, please see [`ggplot2` homepage](https://ggplot2.tidyverse.org/).
 
-As it can be observed in the plot, the library sizes range from 7 to 117 millions of sequences. This means that the ratio between the largest and the smallest libraries is of ~ 16. This is an acceptable value for most statistical approaches. When this ratio is higher than ~3, ad-hoc adjustments should be made to consider the heterogeneity in library sizes. We will talk more about this in the [normalization](#normalization) section of the tutorial. 
+As it can be observed in the plot, the library sizes range from 7 to 117 millions of sequences. This means that the ratio between the largest and the smallest libraries is of ~ 16. This is an acceptable value for most statistical approaches. When this ratio is higher than ~3, ad-hoc adjustments should be made to consider the heterogeneity in library sizes. We will talk more about this in the [normalization](#normalization) section of the tutorial.
 
-## Filtering low abundant species
+
+## Filtering low abundant species and samples
 
 Next, the count matrix data can be filtered to remove bacteria which are lowly abundant across conditions or not present at all. The reasons for this are biological as well as statistical. 
 
 Firstly, species which are abundant at low levels across the different samples are likely to arise from noise in the sequencing process, or are otherwise not likely to be biologically meaningful and are therefore best ignored in the downstream analysis. Secondly, removing species with low counts allows the mean-variance relationship to be more reliably estimated and reduces the number of statistical tests performed during differential analysis. Here, we will keeps species with 10^-5 abundance or more in a minimum number of two samples.
 
-```{r}
-motu.abs.fil <- motu.abs[rowSums(motu.abs >= 10^-5) >= 2, ]
+There are a number of way to decrease the number of features:
+
+- Apply an abundance cutoff (such as only looking at taxa that are at least 1% abundance in at least one sample)
+- Apply a frequency cutoff (such as only looking at taxa that occur in at least 2% of samples)
+
+```{r filter}
+quantile(colSums(motu.abs))
+
+motu.abs.fil <- motu.abs[rowSums(motu.abs >= 10^-5) >= 2,colSums(motu.abs) > 1200 ]
 dim(motu.abs.fil)
 
 # print a message to show the number of species that are retrieved after filtering
@@ -119,148 +204,193 @@ message(
   " species.")
 ```
 
-## Rarefaction
+## Normalization
 
-Rarefaction is used to simulate even numbers of samples (i.e. reads). Even sampling is important for at least two reasons:
+There are multiple factors that can result in libraries of different sizes. Those include experimental variations, batch effects or simply, different sequencing depths. We assume that, if it were not for these variations, all samples should have a similar range and distribution of abundance. Therefore, after data filtering, a normalization step is necessary to ensure that species abundance can be compared between samples and experimental conditions. Below, we use the relative abundance. 
 
-- When comparing diversity of samples, more samples make it more likely to observe rare species. This will have a larger effect on some diversity indexes than others, depending on how they weigh rare species. Therefore, when comparing the diversity or similarity of samples, it is important to rarefy, or subsample, to a constant depth. Typically, the depth chosen is the minimum sample depth. If the minimum depth is very small, the samples with the smallest depth can be removed and the minimum depth of the remaining samples can be used.
+There are other normalisation approaches described in [Pereira et al. 2018](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4637-6) & more recently [Rico et al., 2021](https://www.nature.com/articles/s41467-021-23821-6).
 
-Lets take a look at the distribution of read depths of our samples:
-
-```{r}
-quantile(colSums(motu.abs.fil))
-motu.abs.fil = motu.abs.fil[, colSums(motu.abs.fil) > 1000] 
+```{r normalization}
+# apply relative abundance normalization 
+motu.rel <- prop.table(as.matrix(motu.abs), 2)
+motu.fil.rel <- prop.table(as.matrix(motu.abs.fil), 2)
 ```
 
-We will use `rarefy` function from vegan package for rarefaction
+And have a look to how the normalized values look like:
 
 ```{r}
-# transform count matrix
-motu.t = t(motu.abs.fil)
-
-# rarefy based on minimum number of reads
-min_seq = min(rowSums(motu.t))
-
-Srare <- rarefy(motu.t, min_seq) %>% 
-  as_tibble(rownames="Group") %>%
-  select(Group, vegan=value)# rarefied number of species
-
-# plot rarefaction curves
-rarecurve.data <- rarecurve(motu.t, step = 50, sample = min_seq)
-```
-
-
-```{r}
-# 
-# # plot
-# plot(S, Srare, xlab = "Observed No. of Species in Stool", 
-#                ylab = "Rarefied No. of Species in Stool")
-
-# transform, rarefy, plot, remove rarefied samples
-feat.rare <- rrarefy(motu.t, raremax)
-feat.rare <- t(as.data.frame(feat.rare))
-
-
-S.rare <- vegan::rarefy(motu.t, min_seq) %>%
-  as_tibble(rownames = "Group") %>%
-  select(Group, vegan = value)# rarefied number of species
+motu.fil.rel[1:10,1:10]
 ```
 
 ################################################################################
-# Diversity Analysis
+## Diversity Analysis
 ################################################################################
 
-Diversity in the ecological sense is intuitively understood as the complexity of a community of organisms.The two main categories of methods are known as *alpha diversity* and *beta diversity* 
+Diversity in the ecological sense is intuitively understood as the complexity of a community of organisms.The two main categories of methods are known as **alpha diversity** and **beta diversity** 
 
 ################################################################################
 ## Alpha (within sample) Diversity Analysis
 ################################################################################
 
 Alpha diversity measures the diversity within a single sample and is generally based on the number and relative abundance of taxa at some rank
-*Shannon*: How difficult it is to predict the identity of a randomly chosen individual.
-*Simpson*: The probability that two randomly chosen individuals are the same species.
-*Inverse Simpson*: This is a bit confusing to think about. Assuming a theoretically community where all species were equally abundant, this would be the number of species needed to have the same Simpson index value for the community being analyzed.
+**Shannon**: How difficult it is to predict the identity of a randomly chosen individual.
+**Simpson**: The probability that two randomly chosen individuals are the same species.
+**Inverse Simpson**: This is a bit confusing to think about. Assuming a theoretically community where all species were equally abundant, this would be the number of species needed to have the same Simpson index value for the community being analyzed.
 
-The `diversity` function from the vegan package can be used to calculate the alpha diversity of a set of samples. Like other vegan functions, it assumes that samples are in rows, but they are in columns in our data, so we need to use the MARGIN = 2 option.
+The `diversity` function from the vegan package can be used to calculate the alpha diversity of a set of samples. 
 
 ```{r}
-a=as.data.frame(t(motu.abs.fil))
-shared= a %>% as_tibble(rownames="Group") %>% pivot_longer(-Group)
+# transform count matrix
+motu.t = t(motu.abs.fil)
+
+shared= motu.t %>% 
+  as_tibble(rownames="ID") %>%  
+  pivot_longer(-ID)
 
 alpha.div <- shared %>%
-  group_by(Group) %>%
-  summarize(sobs = specnumber(value),
+  group_by(ID) %>%
+  summarize(richness = specnumber(value),
             shannon = diversity(value, index="shannon"),
             simpson = diversity(value, index="simpson"),
-            invsimpson = 1/simpson, 
+            invsimpson = 1/simpson,
             n = sum(value)) %>%
-  pivot_longer(cols=c(sobs, shannon, invsimpson, simpson), names_to="metric") 
+  pivot_longer(cols=c(richness, shannon, invsimpson, simpson), names_to="metric")
+
+
+# add status info
+alpha.div.com <- left_join(alpha.div, meta, by="ID", all.x=TRUE)
 ```
-```{r}
-alpha.div %>%
+
+Lets have a look how alpha diversity looks like 
+
+```{r plotAlpha}
+alpha.div.com %>%
   ggplot(aes(x=n, y=value)) +
   geom_point() +
   geom_smooth() +
-  facet_wrap(~metric, nrow=4, scales="free_y")
+  facet_wrap(~metric, nrow=2, scales="free_y")
 
-
-ggplot(aes(x=n, y=value)) + 
-  geom_point(aes(y=value)) +
-  geom_boxplot(aes(fill = subject_disease_status)) + 
-  scale_y_continuous(breaks = scales::pretty_breaks(4), limits = c(0, NA)) +
-  xlab("") + ylab("alpha diversity measure") + 
+p.alpha <- alpha.div.com %>%
+  ggplot( aes(x=metric, y=value, fill=status)) + 
+  geom_boxplot() + 
   stat_compare_means() + # wilcox.test p-value
-  facet_grid(. ~ metric, scale="free") +
+  facet_wrap(. ~ metric, scale="free") +
   theme_classic()
+
+p.alpha
+# save plot
+ggsave(p.alpha, filename=paste0(folder.results, "alpha.div.nonrar.pdf"))
 ```
 
-We can use *analysis of variance (ANOVA)* to tell if at least one of the diversity means is different from the rest.
+
+**QUESTION**: Did you notice a pattern for samples with high read counts?
+
+## Rarefaction
+
+Rarefaction is used to simulate even numbers of samples (i.e. reads). Even sampling is important:
+
+- When comparing diversity of samples, more samples make it more likely to observe rare species. This will have a larger effect on some diversity indexes than others, depending on how they weigh rare species. Therefore, when comparing the diversity or similarity of samples, it is important to rarefy, or subsample, to a constant depth. Typically, the depth chosen is the minimum sample depth. If the minimum depth is very small, the samples with the smallest depth can be removed and the minimum depth of the remaining samples can be used.
+
+```{r rarefaction}
+# rarefy based on minimum number of reads
+min_seq = min(rowSums(motu.t))
+
+# plot rarefaction curves
+rarecurve.data <- rarecurve(motu.t, step = 50, sample = min_seq)
+```
+
+We will use `rrarefy` function from vegan package for rarefaction
 
 ```{r}
-  # Calcuate alpha diversity
-  sample_data$alpha <- diversity(obj$data$otu_rarefied[, sample_data$SampleID],
-                                 MARGIN = 2,
-                                 index = "invsimpson")
-  
-  # Do ANOVA
-  sample_data$grouping <- sample_data[[grouping_var]] # needed for how `aov` works
-  anova_result <- aov(alpha ~ grouping, sample_data)
-  
-  # Do Tukey's HSD test
-  tukey_result <- HSD.test(anova_result, "grouping", group = TRUE)
-
-  # Plot result
-  group_data <- tukey_result$groups[order(rownames(tukey_result$groups)),]
-  my_plot <- ggplot(sample_data, aes(x = grouping, y = alpha)) +
-    geom_text(data = data.frame(),
-              aes(x = rownames(group_data),
-                  y = max(sample_data$alpha) + 1,
-                  label = group_data$groups),
-              col = 'black',
-              size = 10) +
-    geom_boxplot() +
-    ggtitle("Alpha diversity") +
-    xlab(grouping_var) +
-    ylab("Alpha diversity index")
-  
+# transform, rarefy
+feat.rare <- rrarefy(motu.t, min_seq)
+feat.rare <- t(as.data.frame(feat.rare))
 ```
 
-That tells us that there is a difference
 
-```{r}
-ps_obj <- as_phyloseq(obj,
-                      otu_table = "otu_rarefied",
-                      otu_id_col = "OTU_ID",
-                      sample_data = sample_data,
-                      sample_id_col = "SampleID")
-plot_richness(ps_obj, color = "Type", x = "Site")
+```{r calculateRarefiedAlpha}
+shared= t(feat.rare) %>% as_tibble(rownames="ID") %>% pivot_longer(-ID)
+
+alpha.div <- shared %>%
+  group_by(ID) %>%
+  summarize(richness = specnumber(value),
+            shannon = diversity(value, index="shannon"),
+            simpson = diversity(value, index="simpson"),
+            invsimpson = 1/simpson,
+            n = sum(value)) %>%
+  pivot_longer(cols=c(richness, shannon, invsimpson, simpson), names_to="metric")
+
+# add status info
+alpha.div.com <- left_join(alpha.div, meta, by="ID", all.x=TRUE)
 ```
+
+In general, you will see roughly normal data for Shannon’s diversity as well as most richness metrics. Simpson’s diversity, on the other hand, is usually skewed. So most will use inverse Simpson (1/Simpson) instead. This not only increases normalcy but also makes the output more logical as a higher inverse Simpson value corresponds to higher diversity.
+
+```{r plotAlpharar}
+alpha.div.com %>%
+  ggplot(aes(x=n, y=value)) +
+  geom_point() +
+  geom_smooth() +
+  facet_wrap(~metric, nrow=2, scales="free_y")
+
+p.alpha <- alpha.div.com %>%
+  ggplot( aes(x=metric, y=value, fill=status)) + 
+  geom_boxplot() + 
+  stat_compare_means() + # wilcox.test p-value
+  facet_wrap(. ~ metric, scale="free") +
+  theme_classic()
+
+p.alpha
+# save plot
+ggsave(p.alpha, filename=paste0(folder.results, "alpha.div.rar.pdf"))
+```
+
+We can use **analysis of variance (ANOVA)** to tell if at least one of the diversity means is different from the rest.
+Overall, for **alpha-diversity**:
+
+- ANOVA, t-test, or general linear models with the normal distribution are used when the data is roughly normal
+- Kruskal-Wallis, Wilcoxon rank sum test, or general linear models with another distribution are used when the data is not normal
+
+However, our sample size is small and normalcy tests are very sensitive for small data-sets. 
+
+```{r anova}
+# Do ANOVA
+metatest = c("smoking", "status","diabetes", "center", "gender", "status",
+             "antibiotic", "periodontitis", "age")
+
+alpha.div.anova <- alpha.div.com %>%
+  pivot_wider(names_from = metric, values_from = value)
+  
+collect.confounders <- data.frame()
+
+for (metavar in metatest) {
+# calculate anova for stool 
+lm <- lm(substitute(richness~ as.factor(metavar), 
+                    list(metavar = as.name(metavar))),
+         data = alpha.div.anova, na.action=na.omit)
+
+aov <- Anova(lm) %>% broom::tidy() %>% 
+  mutate(metric="richness")
+  aov <- aov[1,]
+  aov$term <- metavar
+  
+  # collect data
+  collect.confounders <- rbind(collect.confounders, aov)
+}
+
+# fdr correction
+collect.confounders$p.adj <- p.adjust(collect.confounders$p.value)
+
+# Lets have a look to results
+collect.confounders
+```
+
 
 ################################################################################
 ## Beta (between sample) Diversity Analysis
 ################################################################################
 
-Beta diversity is a way to quantify the difference between two communities. There are many metrics that are used for this, but we will only mention a few of the more popular ones. 
+Beta diversity is a way to quantify the difference between two communities. There are many metrics that are used for this (`manhattan`, `euclidean`, `canberra`, `bray`, `kulczynski`, `jaccard`, `gower`, `altGower`, `morisita`, `horn`, `mountford`, `raup` , `binomial`, `chao`, `cao` or `mahalanobis`), but we will only mention a few of the more popular ones. 
 
 - Indexes used with presence/absence data:
 *Jaccard*: the number of species common to both communities divided by the number of species in either community.
@@ -270,28 +400,96 @@ Beta diversity is a way to quantify the difference between two communities. Ther
 *Bray–Curtis*: The sum of lesser counts for species present in both communities divided by the sum of all counts in both communities. This can be thought of as a quantitative version of the Sørensen index.
 *Weighted Unifrac*: The fraction of the phylogenetic tree branch lengths shared by the two communities, weighted by the counts of organisms, so more abundant organisms have a greater influence.
 
-The vegan function `vegdist` is used to calculate the pairwise beta diversity indexes. Since this is a pairwise comparison, the output is a triangular matrix. In R, a matrix is like a data.frame, but all of the same type (e.g. all numeric), and has some different behavior.
-```{r}
-beta_dist <- vegdist(t(motu.abs),
-                     index = "bray")
+The vegan function `vegdist` is used to compute dissimilarity indexes. Since this is a pairwise comparison, the output is a triangular matrix. In R, a matrix is like a data.frame, but all of the same type (e.g. all numeric), and has some different behavior.
+
+**Bray-Curtis** takes into account species presence/absence, as well as abundance, whereas other measures (like Jaccard) only take into account presence/absence.
+
+```{r betanonRarefied}
+# calculate not rarefied beta diversity
+beta_dist <- vegan::vegdist(t(motu.abs.fil), index = "bray")
 ```
 
-Ordination
+**Non-metric Multi-dimensional Scaling (NMDS)** is a way to condense information from multidimensional data (multiple variables/species/OTUs), into a 2D representation or ordination. In an NMDS plot generated using an count table the points are samples. The closer the points/samples are together in the ordination space, the more similar their microbial communities.
+
+- NMDS plots are non-metric, meaning that among other things, they use data that is not required to fit a normal distribution. This is handy for microbial ecologists because the majority of our data has a skewed distribution with a long tail. In other words, there are only a few abundant species, and many, many species with low abundance (the long tail).
+- What makes an NMDS plot non-metric is that it is rank-based. This means that instead of using the actual values to calculate distances, it uses ranks. So for example, instead of saying that sample A is 5 points away from sample B, and 10 from sample C, you would instead say that: sample A is the “1st” most close sample to B, and sample C is the “2nd” most close.
+
+```{r NMDSnonRarefied}
+nmds <- metaMDS(beta_dist) %>% scores() %>% as_tibble(rownames="ID")
+# combine metadata and betadiv
+meta_nmds <- dplyr::inner_join(meta, nmds)
+```
+
+## Ordination
+
 The typical way beta diversity is plotted is using ordination. Ordination is a way to display “high dimensional” data in a viable number of dimensions (2 to 3). Our data is “high dimensional” because we have many samples with many species and species can be considered a “dimension”. If we had only two species, we could make a scatter plot of their abundance in each sample and get an idea of how the samples differ. With thousands of species, this is not possible. Instead, ordination is used to try to capture the information in many dimensions by in a smaller number of new “artificial” dimensions.
 
-```{r}
-mds <- metaMDS(beta_dist)
-mds_data <- as.data.frame(mds$points)
+```{r plotBeta}
+p.betadiv.ord <- ggplot(meta_nmds, aes(x = NMDS1, y = NMDS2, color = status)) +
+  geom_point() +
+  stat_ellipse()
 
-# To use the sample data in the plotting, we can combine the coordinate data with the sample data table:
-mds_data$SampleID <- rownames(mds_data)
-mds_data <- dplyr::left_join(mds_data, sample_data)
+p.betadiv.ord
 ```
 
-```{r}
-ggplot(mds_data, aes(x = MDS1, y = MDS2, color = Type)) +
-  geom_point()
+**QUESTION**: What happens when you change color according to center, gender, diabetes...
+
+**QUESTION**: Does the difference significant?
+
+```{r adonis}
+test.adonis <- adonis(as.dist(beta_dist) ~ meta_nmds$status)
+test.adonis
+# p.value here
+test.adonis$aov.tab$`Pr(>F)`[1]
+```
+## Calculating Rarefied Beta Diversity
+
+`avgdist` function computes the dissimilarity matrix of a dataset multiple times using `vegdist` while randomly subsampling the dataset each time. All of the subsampled iterations are then averaged (mean) to provide a distance matrix that represents the average of multiple subsampling iterations.
+
+```{r betaRarefied}
+# calculate rarefied beta diversity
+beta_dist.rar <-t(motu.abs.fil) %>%
+  vegan::avgdist(dmethod = "bray", sample = min_seq)
+nmds.rar <- metaMDS(beta_dist.rar) %>% scores() %>% as.tibble(rownames="ID")
+
+# combine metadata and betadiv
+meta_nmds.rar <- dplyr::inner_join(meta, nmds.rar)
 ```
 
-*QUESTION* What happens when you change color according to center, gender, diabetes...
+```{r plotRarefied}
+p.betadiv.ord.rar <- ggplot(meta_nmds.rar, aes(x = NMDS1, y = NMDS2, color = status)) +
+  geom_point() +
+  stat_ellipse()
+
+p.betadiv.ord.rar
+```
+
+**QUESTION**: What happens when you change color according to center, gender, diabetes...
+
+**QUESTION**: Does the difference significant?
+
+```{r adonisRarefied}
+test.adonis <- adonis(as.dist(beta_dist.rar) ~ meta_nmds$status)
+test.adonis
+# p.value here
+test.adonis$aov.tab$`Pr(>F)`[1]
+```
+
+```{r saveFiles}
+save(motu.rel, motu.fil.rel, meta,
+     file=paste0(folder, "/data/motu.relative.Rdata"))
+```
+
+**QUESTION**: What about other meta variables? Change the test variables and see what happens.
+
+## Session info
+
+It is good practice to print the so-called session info at the end of an
+R script, which prints all loaded libraries, their versions etc. This
+can be helpful for reproducibility and recapitulating which package
+versions have been used to produce the results obtained above.
+
+```{r sessionInfo}
+sessionInfo()
+```
 

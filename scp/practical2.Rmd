@@ -15,16 +15,32 @@ editor_options:
     wrap: 72
 ---
 
+
+This vignette contains the course schedule and material of the **Microbiome Data Analysis & Visualization Course**. 
+
 This is the schedule for the practical session part 2:
 
 - Differential abundance analysis: 40 minutes
 - Break: 10 minutes
-- Machine learning modelling with SIAMCAT: 50 minutes
+- Machine learning modelling with SIAMCAT: 60 minutes
 - Conclusions: 10 minutes
 
 ## Loading packages and data in R
 
-We first load the packages that we will employ during the tutorial
+Before we start with any analysis, it is good practice to load all
+required libraries. This will also immediately identify libraries that
+may be missing. Note that for this course, we pre-installed all
+libraries for you. When you run your own analysis, you have to check
+which libraries are already available, and which are not. We use
+`suppressPackageStartupMessages` here to suppress the output messages of
+the various packages for reasons of brevity.
+
+When using functions that sample pseudorandom numbers, each time you
+execute them you will obtain a different result. For the purpose of this
+vignette, this is not what we want. We therefore set a particular seed
+value(here: 1881) so that the result will always be the same. For more
+information, check out [this webpage](https://r-coder.com/set-seed-r)
+that explains this general concept in more detail.
 
 ```{r library, eval=TRUE}
 suppressPackageStartupMessages({
@@ -47,60 +63,19 @@ folder.results <- paste0(folder, "/results/")
 file.path(folder, 'data/mobi.Rdata')
 
 # load data
-load(file=file.path(folder, 'data/mobi.Rdata'))
+load(file=file.path(folder, '/data/motu.relative.Rdata'))
 ```
 
 ################################################################################
-## Differential Abundance Analysis
-################################################################################
-
-Since we are running multiple similar tests, we need to apply a false discovery rate (fdr) correctios and correcting across all features will most likely result in no significant results after fdr correction. Also, you don’t want to look at over 14.000 P-values, do you?
-
-There are a number of way to decrease the number of features:
-
-- Apply an abundance cutoff (such as only looking at taxa that are at least 1% abundance in at least one sample)
-- Apply a frequency cutoff (such as only looking at taxa that occur in at least 2% of samples)
-
-```{r filtering}
-# filter low abundant taxa
-motu.abs.fil <- motu.abs[rowSums(motu.abs >= 10^-5) >= 2, ]
-
-dim(motu.abs.fil)
-# print a message to show the number of species that are retrieved after filtering
-message(
-  "Initial count matrix contained ",
-  nrow(motu.abs),
-  " species and the resulting count matrix contains ",
-  nrow(motu.abs.fil),
-  " species.")
-```
-
-## Normalization
-
-There are multiple factors that can result in libraries of different sizes. Those include experimental variations, batch effects or simply, different sequencing depths. We assume that, if it were not for these variations, all samples should have a similar range and distribution of abundance. Therefore, after data filtering, a normalization step is necessary to ensure that species abundance can be compared between samples and experimental conditions. Below, we use the relative abundance. 
-
-There are other normalisation approaches described in [Pereira et al. 2018](https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-018-4637-6) & more recently [Rico et al., 2021](https://www.nature.com/articles/s41467-021-23821-6).
-
-```{r normalization}
-# apply relative abundance normalization 
-motu.rel <- prop.table(as.matrix(motu.abs), 2)
-motu.fil.rel <- prop.table(as.matrix(motu.abs.fil), 2)
-```
-
-And have a look to how the normalized values look like:
-
-```{r}
-motu.fil.rel[1:10,1:10]
-```
-
 ## Differential Abundance Analysis with Wilcoxin Test
+################################################################################
 
 Next, we can analyze the differences between the microbiome profiles of both groups. To do so, we use `wilcoxin test` which is a statistical test where all species in the count matrix are compared between the sample groups of interest.  `wilcoxin test` is not the only option to perform Differential Abundance Analysis. Common alternatives include [`edgeR`](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2796818/) and [`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8).
 
 ```{r differentialAbundance}
 featTable = motu.fil.rel
-metaTable = meta
-metaTable$ID = rownames(metaTable)
+# subset meta accordingly
+metaTable = meta[meta$ID %in% colnames(motu.fil.rel),]
 # define cutoffs
 p_cutoff = 0.05
 ##############################################################################
@@ -242,7 +217,7 @@ The models are saved in the **model_list** slot of the *SIAMCAT* object. The mod
 
 ```{r SiamcatModelling, results='hold'}
 # split data for nested cross validation  
-siamcat <- create.data.split(siamcat, num.folds = 10, num.resample = 10)
+siamcat <- create.data.split(siamcat, num.folds = 10, num.resample = 100)
 # run model
 siamcat <- train.model(siamcat, method = "lasso_ll")
 ```
