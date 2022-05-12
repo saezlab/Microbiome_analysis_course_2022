@@ -1,7 +1,0 @@
-"0","model.evaluation.plot('Only MetaG'= siamcat,
-                      'MetaG and smoking'= siamcat.smoking,
-                      fn.plot = paste0(folder.results, 'metag.smoking.combined.pdf'))
-"
-"2","Error in model.evaluation.plot(`Only MetaG` = siamcat, `MetaG and smoking` = siamcat.smoking,  : 
-  object 'siamcat.smoking' not found
-"

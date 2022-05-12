@@ -1,3 +1,0 @@
-"0","# set the working directory"
-"0","setwd(""~/Documents/SAEZ/teaching/Microbiome_analysis_course_2022/"")"
-"0","load(""data/mobi.Rdata"")"
