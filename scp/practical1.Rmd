@@ -264,12 +264,14 @@ alpha.div.com <- left_join(alpha.div, meta, by="ID", all.x=TRUE)
 Lets have a look how alpha diversity looks like 
 
 ```{r plotAlpha}
+# lets compare the indices based on a scatter-plot.
 alpha.div.com %>%
   ggplot(aes(x=n, y=value)) +
   geom_point() +
-  geom_smooth() +
+  geom_smooth(method=lm) +
   facet_wrap(~metric, nrow=2, scales="free_y")
 
+# to compare indices between different patient status, boxplot is suitable
 p.alpha <- alpha.div.com %>%
   ggplot( aes(x=metric, y=value, fill=status)) + 
   geom_boxplot() + 
@@ -324,19 +326,22 @@ alpha.div <- shared %>%
 alpha.div.com <- left_join(alpha.div, meta, by="ID", all.x=TRUE)
 ```
 
-In general, you will see roughly normal data for Shannon’s diversity as well as most richness metrics. Simpson’s diversity, on the other hand, is usually skewed. So most will use inverse Simpson (1/Simpson) instead. This not only increases normalcy but also makes the output more logical as a higher inverse Simpson value corresponds to higher diversity.
+In general, you will see roughly normal distribution for Shannon’s diversity as well as most richness metrics. Simpson’s diversity, on the other hand, is usually skewed. So most will use inverse Simpson (1/Simpson) instead. This not only increases normalcy but also makes the output more logical as a higher inverse Simpson value corresponds to higher diversity.
 
 ```{r plotAlpharar}
+# lets compare the indices based on a scatter-plot.
 alpha.div.com %>%
   ggplot(aes(x=n, y=value)) +
   geom_point() +
-  geom_smooth() +
+  geom_smooth(method=lm) +
   facet_wrap(~metric, nrow=2, scales="free_y")
 
+# to compare indices between different patient status, boxplot is suitable.
+# wilcox.test is a non-parametric test that doesn’t make specific assumptions about the distribution, unlike popular parametric tests, such as the t test, which assumes normally distributed observations. Wilcoxon test can be used to estimate whether the differences between two groups is statistically significant. 
 p.alpha <- alpha.div.com %>%
   ggplot( aes(x=metric, y=value, fill=status)) + 
   geom_boxplot() + 
-  stat_compare_means() + # wilcox.test p-value
+  stat_compare_means() + 
   facet_wrap(. ~ metric, scale="free") +
   theme_classic()
 
@@ -402,7 +407,7 @@ Beta diversity is a way to quantify the difference between two communities. Ther
 
 The vegan function `vegdist` is used to compute dissimilarity indexes. Since this is a pairwise comparison, the output is a triangular matrix. In R, a matrix is like a data.frame, but all of the same type (e.g. all numeric), and has some different behavior.
 
-**Bray-Curtis** takes into account species presence/absence, as well as abundance, whereas other measures (like Jaccard) only take into account presence/absence.
+**Bray-Curtis** takes into account species presence/absence, as well as abundance, whereas other measures (like Jaccard) only take into account presence/absence and UniFrac incorporates phylogenetic information. 
 
 ```{r betanonRarefied}
 # calculate not rarefied beta diversity

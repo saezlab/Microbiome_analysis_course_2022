@@ -72,6 +72,9 @@ load(file=file.path(folder, '/data/motu.relative.Rdata'))
 
 Next, we can analyze the differences between the microbiome profiles of both groups. To do so, we use `wilcoxin test` which is a statistical test where all species in the count matrix are compared between the sample groups of interest.  `wilcoxin test` is not the only option to perform Differential Abundance Analysis. Common alternatives include [`edgeR`](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2796818/) and [`DESeq2`](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8).
 
+
+A **Wilcoxon test** estimates the difference in an outcome between two groups. It is a non-parametric alternative to a t-test, which means that the Wilcoxon test does not make any assumptions about the data.
+
 ```{r differentialAbundance}
 featTable = motu.fil.rel
 # subset meta accordingly
