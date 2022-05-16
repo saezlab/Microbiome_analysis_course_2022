@@ -90,20 +90,20 @@ that explains this general concept in more detail.
 
 ```{r, message=FALSE, eval=FALSE}
 # CRAN packages
-# cran_packages <- c("tidyverse", "BiocManager", "knitr", "ggrepel", "pROC", "vegan",
-#                    "reshape2", "ggplot2", "ggpubr", "car",  "dplyr", "plyr")
-# for (i in cran_packages) {
-#   if (!require(i, character.only = TRUE))
-#     install.packages(i)
-# }
-# 
-# # BioC packages
-# bioc_packages <-
-#   c("SIAMCAT")
-# for (i in bioc_packages) {
-#   if (!require(i, character.only = TRUE))
-#     BiocManager::install(i, update = FALSE)
-# } 
+cran_packages <- c("tidyverse", "BiocManager", "knitr", "ggrepel", "pROC", "vegan",
+                   "reshape2", "ggplot2", "ggpubr", "car",  "dplyr", "plyr")
+for (i in cran_packages) {
+  if (!require(i, character.only = TRUE))
+    install.packages(i)
+}
+
+# BioC packages
+bioc_packages <-
+  c("SIAMCAT")
+for (i in bioc_packages) {
+  if (!require(i, character.only = TRUE))
+    BiocManager::install(i, update = FALSE)
+}
 ```
 
 ```{r, message=FALSE}
@@ -248,8 +248,8 @@ shared= motu.t %>%
   pivot_longer(-ID)
 
 alpha.div <- shared %>%
-  group_by(ID) %>%
-  summarize(richness = specnumber(value),
+  dplyr::group_by(ID) %>%
+  dplyr::summarize(richness = specnumber(value),
             shannon = diversity(value, index="shannon"),
             simpson = diversity(value, index="simpson"),
             invsimpson = 1/simpson,
@@ -420,7 +420,7 @@ beta_dist <- vegan::vegdist(t(motu.abs.fil), index = "bray")
 - What makes an NMDS plot non-metric is that it is rank-based. This means that instead of using the actual values to calculate distances, it uses ranks. So for example, instead of saying that sample A is 5 points away from sample B, and 10 from sample C, you would instead say that: sample A is the “1st” most close sample to B, and sample C is the “2nd” most close.
 
 ```{r NMDSnonRarefied}
-nmds <- metaMDS(beta_dist) %>% scores() %>% as_tibble(rownames="ID")
+nmds <- metaMDS(beta_dist) %>% scores(display=c("sites")) %>% as_tibble(rownames="ID")
 # combine metadata and betadiv
 meta_nmds <- dplyr::inner_join(meta, nmds)
 ```
@@ -442,7 +442,7 @@ p.betadiv.ord
 **QUESTION**: Does the difference significant?
 
 ```{r adonis}
-test.adonis <- adonis(as.dist(beta_dist) ~ meta_nmds$status)
+test.adonis <- adonis(as.dist(beta_dist) ~ meta_nmds$center)
 test.adonis
 # p.value here
 test.adonis$aov.tab$`Pr(>F)`[1]
@@ -455,7 +455,7 @@ test.adonis$aov.tab$`Pr(>F)`[1]
 # calculate rarefied beta diversity
 beta_dist.rar <-t(motu.abs.fil) %>%
   vegan::avgdist(dmethod = "bray", sample = min_seq)
-nmds.rar <- metaMDS(beta_dist.rar) %>% scores() %>% as.tibble(rownames="ID")
+nmds.rar <- metaMDS(beta_dist.rar) %>% scores(display=c("sites")) %>% as.tibble(rownames="ID")
 
 # combine metadata and betadiv
 meta_nmds.rar <- dplyr::inner_join(meta, nmds.rar)

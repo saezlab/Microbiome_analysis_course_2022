@@ -220,7 +220,7 @@ The models are saved in the **model_list** slot of the *SIAMCAT* object. The mod
 
 ```{r SiamcatModelling, results='hold'}
 # split data for nested cross validation  
-siamcat <- create.data.split(siamcat, num.folds = 10, num.resample = 100)
+siamcat <- create.data.split(siamcat, num.folds = 5, num.resample = 5)
 # run model
 siamcat <- train.model(siamcat, method = "lasso_ll")
 ```
